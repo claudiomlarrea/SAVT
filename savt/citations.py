@@ -1,0 +1,293 @@
+from __future__ import annotations
+
+import re
+
+from savt.bibliography_styles import apa_keys_match
+from savt.models import Finding, ReferenceEntry
+
+DEFAULT_TOPICAL_KEYWORDS = [
+    "diastasis",
+    "rectus",
+    "abdomin",
+    "hernia",
+    "plicat",
+    "postpartum",
+    "postgest",
+    "dermolipect",
+    "abdominal wall",
+    "linea alba",
+    "línea alba",
+    "abdominoplast",
+]
+
+GENERIC_STOPWORDS = {
+    "the",
+    "and",
+    "for",
+    "with",
+    "that",
+    "this",
+    "from",
+    "were",
+    "have",
+    "has",
+    "como",
+    "para",
+    "sobre",
+    "entre",
+    "desde",
+    "hacia",
+    "pacientes",
+    "estudios",
+    "evidencia",
+    "resultados",
+}
+
+
+def _topic_keywords(parsed: dict) -> list[str]:
+    inferred = parsed.get("topic_keywords") or []
+    if inferred:
+        return inferred + DEFAULT_TOPICAL_KEYWORDS
+    return DEFAULT_TOPICAL_KEYWORDS
+
+
+def _tokens(text: str) -> set[str]:
+    words = re.findall(r"[a-záéíóúñ]{4,}", text.lower())
+    return {w for w in words if w not in GENERIC_STOPWORDS}
+
+
+def topical_score(reference: ReferenceEntry, paragraph: str, keywords: list[str]) -> float:
+    ref_text = reference.raw.lower()
+    ref_topical = any(k in ref_text for k in keywords)
+    para_tokens = _tokens(paragraph)
+    ref_tokens = _tokens(reference.raw)
+    overlap = len(para_tokens & ref_tokens) / max(len(para_tokens), 1) if para_tokens and ref_tokens else 0.0
+    keyword_bonus = 0.35 if ref_topical else 0.0
+    return min(1.0, overlap + keyword_bonus)
+
+
+def is_reference_topical(reference: ReferenceEntry, keywords: list[str]) -> bool:
+    text = reference.raw.lower()
+    return any(k in text for k in keywords)
+
+
+def _audit_numbered_citations(parsed: dict, keywords: list[str]) -> list[Finding]:
+    findings: list[Finding] = []
+    bibliography: dict[int, ReferenceEntry] = parsed["bibliography"]
+    cited: set[int] = parsed["cited_numbers"]
+    body = parsed["body"]
+
+    bib_nums = set(bibliography.keys())
+    expected = set(range(1, max(bib_nums) + 1))
+    gaps = sorted(expected - bib_nums)
+    if gaps:
+        findings.append(
+            Finding(
+                module="Bibliografía",
+                severity="error",
+                title="Numeración bibliográfica no consecutiva",
+                detail=f"Faltan referencias en la secuencia: {gaps[:15]}",
+                evidence=f"Última referencia detectada: {max(bib_nums)}",
+            )
+        )
+
+    missing_in_bib = sorted(cited - bib_nums)
+    if missing_in_bib:
+        findings.append(
+            Finding(
+                module="Bibliografía",
+                severity="error",
+                title="Citas sin entrada bibliográfica",
+                detail=f"Referencias citadas en el texto pero ausentes en bibliografía: {missing_in_bib[:20]}",
+            )
+        )
+
+    uncited = sorted(bib_nums - cited)
+    if uncited:
+        findings.append(
+            Finding(
+                module="Bibliografía",
+                severity="warning",
+                title="Referencias bibliográficas no citadas",
+                detail=f"Entradas en bibliografía que no aparecen en el cuerpo: {uncited[:20]}",
+            )
+        )
+    else:
+        findings.append(
+            Finding(
+                module="Bibliografía",
+                severity="ok",
+                title="Correspondencia citas ↔ bibliografía",
+                detail="Todas las referencias numeradas fueron citadas al menos una vez.",
+            )
+        )
+
+    mismatches: list[str] = []
+    for ref_num, paragraph in parsed.get("citation_contexts", []):
+        ref = bibliography.get(ref_num)
+        if not ref:
+            continue
+        score = topical_score(ref, paragraph, keywords)
+        if score < 0.08 and not is_reference_topical(ref, keywords):
+            snippet = paragraph[:160].replace("\n", " ")
+            mismatches.append(f"[{ref_num}] score={score:.2f} → …{snippet}…")
+
+    if mismatches:
+        findings.append(
+            Finding(
+                module="Bibliografía",
+                severity="warning",
+                title="Posible desajuste cita ↔ contenido del párrafo",
+                detail="Algunas citas numeradas parecen poco relacionadas con el párrafo donde aparecen.",
+                evidence="\n".join(mismatches[:8]),
+            )
+        )
+
+    return findings
+
+
+def _audit_apa_citations(parsed: dict, keywords: list[str]) -> list[Finding]:
+    findings: list[Finding] = []
+    bibliography: dict[int, ReferenceEntry] = parsed["bibliography"]
+    cited_keys: set[str] = parsed.get("cited_keys", set())
+    bib_keys = {ref.key for ref in bibliography.values() if ref.key}
+
+    missing_in_bib = sorted(key for key in cited_keys if not apa_keys_match(key, bib_keys))
+    if missing_in_bib:
+        findings.append(
+            Finding(
+                module="Bibliografía",
+                severity="warning",
+                title="Citas APA sin coincidencia exacta en bibliografía",
+                detail=(
+                    f"{len(missing_in_bib)} citas autor-año del texto no coinciden "
+                    "automáticamente con una entrada (puede deberse a 'et al.' o variaciones)."
+                ),
+                evidence=", ".join(missing_in_bib[:12]),
+            )
+        )
+
+    uncited = sorted(key for key in bib_keys if not any(apa_keys_match(key, {cited}) for cited in cited_keys))
+    if uncited and len(uncited) > len(bib_keys) * 0.35:
+        findings.append(
+            Finding(
+                module="Bibliografía",
+                severity="warning",
+                title="Muchas referencias APA no detectadas como citadas",
+                detail=(
+                    f"{len(uncited)} entradas no fueron reconocidas en el texto. "
+                    "En PDF es común por cortes de línea o citas narrativas."
+                ),
+                evidence=", ".join(uncited[:12]),
+            )
+        )
+    elif bib_keys and cited_keys:
+        coverage = sum(1 for key in cited_keys if apa_keys_match(key, bib_keys)) / max(len(cited_keys), 1)
+        findings.append(
+            Finding(
+                module="Bibliografía",
+                severity="ok",
+                title="Correspondencia citas APA ↔ bibliografía",
+                detail=(
+                    f"Se detectaron {len(cited_keys)} claves autor-año en el texto y "
+                    f"{len(bibliography)} referencias bibliográficas "
+                    f"(coincidencia directa: {coverage:.0%})."
+                ),
+            )
+        )
+
+    return findings
+
+
+def audit_citations(parsed: dict) -> list[Finding]:
+    findings: list[Finding] = []
+    bibliography: dict[int, ReferenceEntry] = parsed["bibliography"]
+    body = parsed["body"]
+    style = parsed.get("citation_style", "numbered")
+    keywords = _topic_keywords(parsed)
+
+    if not bibliography:
+        findings.append(
+            Finding(
+                module="Bibliografía",
+                severity="error",
+                title="No se detectó bibliografía",
+                detail="No se encontró una sección BIBLIOGRAFÍA parseable al final del documento.",
+            )
+        )
+        return findings
+
+    findings.append(
+        Finding(
+            module="Bibliografía",
+            severity="info",
+            area="Bibliografía",
+            title=f"Estilo de citación detectado: {style.upper()}",
+            detail=(
+                "Numerado Vancouver" if style == "numbered" else "Autor-año APA"
+            ),
+        )
+    )
+
+    if style == "apa":
+        findings.extend(_audit_apa_citations(parsed, keywords))
+    else:
+        findings.extend(_audit_numbered_citations(parsed, keywords))
+
+    duplicate_dois: dict[str, list[int]] = {}
+    for num, ref in bibliography.items():
+        if ref.doi:
+            duplicate_dois.setdefault(ref.doi.lower(), []).append(num)
+    dupes = {doi: nums for doi, nums in duplicate_dois.items() if len(nums) > 1}
+    if dupes:
+        sample = ", ".join(f"{doi} → refs {nums}" for doi, nums in list(dupes.items())[:5])
+        findings.append(
+            Finding(
+                module="Bibliografía",
+                severity="warning",
+                title="DOI duplicados",
+                detail="Se detectaron DOI repetidos en distintas referencias.",
+                evidence=sample,
+            )
+        )
+
+    if style == "numbered":
+        irrelevant_refs = [
+            n for n, ref in bibliography.items() if not is_reference_topical(ref, keywords)
+        ]
+        if irrelevant_refs and len(irrelevant_refs) > len(bibliography) * 0.15:
+            findings.append(
+                Finding(
+                    module="Bibliografía",
+                    severity="warning",
+                    title="Referencias posiblemente ajenas al tema central",
+                    detail=(
+                        f"{len(irrelevant_refs)} referencias no contienen términos clave "
+                        "inferidos del título/tema."
+                    ),
+                    evidence=f"Ejemplos: {irrelevant_refs[:12]}",
+                )
+            )
+
+    year_range = re.search(r"(20\d{2})\s*[–-]\s*(20\d{2})", body)
+    if year_range:
+        start_year = int(year_range.group(1))
+        pre_range = [
+            n
+            for n, ref in bibliography.items()
+            if ref.year and ref.year.isdigit() and int(ref.year) < start_year
+        ]
+        if pre_range:
+            findings.append(
+                Finding(
+                    module="Bibliografía",
+                    severity="info",
+                    title="Referencias anteriores al rango metodológico declarado",
+                    detail=(
+                        f"Se detectaron {len(pre_range)} referencias anteriores a {start_year}."
+                    ),
+                    evidence=f"Ejemplos: {pre_range[:10]}",
+                )
+            )
+
+    return findings
