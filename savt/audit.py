@@ -1,12 +1,12 @@
 from __future__ import annotations
 
+from savt.bibliography_analysis import build_bibliography_details
 from savt.citations import audit_citations
 from savt.coherence import audit_coherence
 from savt.figures import analyze_figures
 from savt.models import AuditReport
 from savt.objectives_coherence import audit_objectives_coherence
 from savt.parser import parse_thesis_file
-from savt.references import audit_references
 from savt.research_question import audit_research_question
 from savt.report_builder import build_dashboard
 from savt.similarity import audit_similarity
@@ -40,13 +40,14 @@ def run_audit(
     findings.extend(table_findings)
     findings.extend(audit_style(parsed))
     findings.extend(audit_similarity(parsed))
-    findings.extend(
-        audit_references(
-            parsed["bibliography"],
-            verify_online=verify_references_online,
-            max_checks=max_doi_checks,
-        )
+
+    bib_details, bib_findings = build_bibliography_details(
+        parsed,
+        parsed["bibliography"],
+        verify_online=verify_references_online,
+        max_checks=max_doi_checks,
     )
+    findings.extend(bib_findings)
 
     for finding in findings:
         enrich_finding(finding)
@@ -78,6 +79,7 @@ def run_audit(
         "research_question": question_dashboard,
         "figures_detail": figure_details,
         "tables_detail": table_details,
+        "bibliography_details": bib_details,
     }
     report.metadata["dashboard"] = build_dashboard(report, parsed, extras)
     return report

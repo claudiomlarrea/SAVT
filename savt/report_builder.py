@@ -2,99 +2,272 @@ from __future__ import annotations
 
 import re
 
-from savt.bibliography_styles import apa_keys_match
+from savt.chapter_reviews import (
+    build_chapter_reviews,
+    checklist_status_from_reviews,
+    readiness_emoji,
+)
 from savt.models import AuditReport, Finding
 from savt.taxonomy import enrich_finding, icao_interpretation, presentation_status, severity_label
 
+USER_FACING_TITLES: dict[str, str] = {
+    "Respuesta a la pregunta de investigación poco explícita": (
+        "La respuesta a la pregunta de investigación es poco explícita."
+    ),
+    "Pregunta no respondida explícitamente en conclusiones": (
+        "La pregunta no se responde explícitamente en las conclusiones."
+    ),
+    "Conclusiones no responden explícitamente la pregunta": (
+        "Las conclusiones no responden de forma directa la pregunta de investigación."
+    ),
+    "Citas APA sin coincidencia exacta en bibliografía": (
+        "Se detectaron citas APA sin coincidencia exacta en bibliografía."
+    ),
+    "DOI inválidos o no resueltos": "Hay DOI inválidos o no resueltos en la bibliografía.",
+    "Año bibliográfico distinto al registrado en Crossref": (
+        "El año de algunas referencias no coincide con Crossref."
+    ),
+    "Referencias anteriores al rango metodológico declarado": (
+        "Existen referencias anteriores al rango metodológico declarado."
+    ),
+    "Posible desajuste cita ↔ contenido del párrafo": (
+        "Algunas citas parecen poco relacionadas con el párrafo donde aparecen."
+    ),
+    "Referencias posiblemente ajenas al tema central": (
+        "Algunas referencias podrían no estar relacionadas con el tema central."
+    ),
+    "Referencias bibliográficas no citadas": (
+        "Hay referencias bibliográficas que no aparecen citadas en el texto."
+    ),
+    "Abundancia de párrafos breves": (
+        "Hay exceso de párrafos muy breves en la redacción."
+    ),
+    "Introducción incompleta": "La introducción no incluye todos los elementos esperados.",
+    "Metodología con elementos faltantes": "La metodología no desarrolla todos los componentes esperados.",
+}
 
-def build_bibliography_dashboard(report: AuditReport, parsed: dict) -> dict:
-    style = parsed.get("citation_style", "numbered")
-    bibliography = report.bibliography
-    cited_count = len(report.cited_numbers) or len(report.cited_keys)
-    bib_count = len(bibliography)
+THEME_KEYWORDS: dict[str, tuple[str, ...]] = {
+    "bibliografía": ("bibliograf", "cita", "referencia", "doi"),
+    "conclusiones": ("conclus", "pregunta"),
+    "metodología": ("metodolog", "metodo"),
+    "estructura": ("introducc", "estructura", "resultado", "discusi"),
+    "figuras": ("figura", "tabla"),
+    "redacción": ("estilo", "párrafo", "parrafo", "redacc"),
+}
 
-    unmatched = 0
-    if style == "apa":
-        bib_keys = {ref.key for ref in bibliography.values() if ref.key}
-        unmatched = sum(1 for key in report.cited_keys if not apa_keys_match(key, bib_keys))
+STRENGTH_LABELS: dict[str, str] = {
+    "Metodología con componentes principales": "Metodología consistente",
+    "Introducción estructuralmente completa": "Introducción bien estructurada",
+    "Correspondencia citas APA ↔ bibliografía": "Bibliografía alineada con las citas",
+    "Correspondencia citas ↔ bibliografía": "Bibliografía alineada con las citas",
+    "Figuras citadas en el texto": "Figuras integradas al texto",
+    "Coherencia metodológica documental": "Metodología coherente con el tipo de estudio",
+    "Coherencia metodológica empírica": "Metodología empírica coherente",
+    "Extensión dentro del rango esperado": "Extensión adecuada",
+    "Pregunta respondida en conclusiones": "La pregunta se retoma en las conclusiones",
+    "Coherencia objetivos → resultados → conclusiones": "Buena coherencia entre objetivos y cierre",
+}
 
-    out_of_period = 0
-    body = parsed.get("body", "")
-    year_range = re.search(r"(20\d{2})\s*[–-]\s*(20\d{2})", body)
-    if year_range:
-        start_year = int(year_range.group(1))
-        out_of_period = sum(
-            1
-            for ref in bibliography.values()
-            if ref.year and ref.year.isdigit() and int(ref.year) < start_year
-        )
+WEAKNESS_LABELS: dict[str, str] = {
+    "Respuesta a la pregunta de investigación poco explícita": "Conclusiones poco explícitas",
+    "Pregunta no respondida explícitamente en conclusiones": "Conclusiones no responden la pregunta",
+    "Conclusiones no responden explícitamente la pregunta": "Conclusiones no responden la pregunta",
+    "Citas APA sin coincidencia exacta en bibliografía": "Algunas referencias no coinciden con las citas",
+    "Posible desajuste cita ↔ contenido del párrafo": "Algunas citas parecen mal ubicadas",
+    "Referencias posiblemente ajenas al tema central": "Referencias posiblemente ajenas al tema",
+    "Abundancia de párrafos breves": "Exceso de párrafos breves",
+    "Introducción incompleta": "Introducción incompleta",
+    "Metodología con elementos faltantes": "Metodología con lagunas",
+}
 
-    off_topic = 0
-    keywords = parsed.get("topic_keywords") or []
-    if keywords:
-        off_topic = sum(
-            1
-            for ref in bibliography.values()
-            if keywords and not any(k in ref.raw.lower() for k in keywords[:6])
-        )
 
-    coverage = "adecuada"
-    if unmatched > 5 or (bib_count and cited_count / max(bib_count, 1) < 0.6):
-        coverage = "requiere revisión"
-    elif unmatched > 0 or out_of_period > 5:
-        coverage = "aceptable con observaciones"
+def display_title(finding: Finding) -> str:
+    return USER_FACING_TITLES.get(finding.title, finding.title if finding.title.endswith(".") else f"{finding.title}.")
 
+
+def gravity_label(severity: str) -> str:
     return {
-        "style": style.upper(),
-        "style_ok": True,
-        "total_refs": bib_count,
-        "citations_found": cited_count,
-        "unmatched_citations": unmatched,
-        "out_of_period": out_of_period,
-        "possibly_off_topic": min(off_topic, bib_count),
-        "coverage": coverage,
+        "error": "Grave — corregir antes de entregar",
+        "warning": "Moderado — revisar con el director",
+        "info": "Menor — mejora recomendada",
+    }.get(severity, "")
+
+
+def build_bibliography_dashboard(report: AuditReport, bib_details: dict) -> dict:
+    if bib_details:
+        return {
+            "style": bib_details.get("style", "—"),
+            "style_ok": True,
+            "total_refs": bib_details.get("total_refs", 0),
+            "citations_found": bib_details.get("citations_found", 0),
+            "unmatched_citations": bib_details.get("unmatched_count", 0),
+            "out_of_period": len(bib_details.get("out_of_period") or []),
+            "possibly_off_topic": bib_details.get("off_topic_count", 0),
+            "coverage": bib_details.get("coverage", "—"),
+            "details": bib_details,
+        }
+    return {
+        "style": "—",
+        "style_ok": False,
+        "total_refs": len(report.bibliography),
+        "citations_found": 0,
+        "unmatched_citations": 0,
+        "out_of_period": 0,
+        "possibly_off_topic": 0,
+        "coverage": "—",
+        "details": {},
     }
 
 
-def build_jury_assessment(report: AuditReport) -> dict:
+def _warning_detail_items(finding: Finding, bib_details: dict) -> list[dict]:
+    title = finding.title
+    items: list[dict] = []
+
+    if "Citas APA sin coincidencia" in title:
+        for entry in bib_details.get("unmatched_apa") or []:
+            items.append(
+                {
+                    "label": "Cita en el texto",
+                    "value": ", ".join(entry["citations_in_text"]),
+                    "extra": f"Clave detectada: {entry['key']}",
+                }
+            )
+    elif "Referencias anteriores al rango" in title:
+        for entry in bib_details.get("out_of_period") or []:
+            items.append(
+                {
+                    "label": f"Ref. {entry['number']} ({entry['year']})",
+                    "value": entry["summary"],
+                    "extra": f"Período declarado: {entry['period_declared']}",
+                }
+            )
+    elif "ajenas al tema" in title:
+        for entry in bib_details.get("off_topic") or []:
+            items.append({"label": f"Ref. {entry['number']}", "value": entry["summary"]})
+    elif title == "DOI inválidos o no resueltos":
+        for entry in bib_details.get("doi_invalid") or []:
+            items.append(
+                {
+                    "label": f"Ref. {entry['number']} — DOI inválido",
+                    "value": entry["doi_url"],
+                    "extra": entry["message"],
+                }
+            )
+        for entry in bib_details.get("doi_not_resolved") or []:
+            items.append(
+                {
+                    "label": f"Ref. {entry['number']} — DOI no resuelto",
+                    "value": entry["doi_url"],
+                    "extra": entry["message"],
+                }
+            )
+    elif "Año bibliográfico distinto" in title:
+        for entry in bib_details.get("doi_year_mismatch") or []:
+            items.append(
+                {
+                    "label": f"Ref. {entry['number']}",
+                    "value": (
+                        f"Año en bibliografía: {entry['year_in_bibliography']} · "
+                        f"Año Crossref: {entry['year_in_crossref']}"
+                    ),
+                    "extra": f"{entry['doi_url']} — {entry['summary'][:120]}…",
+                }
+            )
+    elif "DOI no verificados por conexión" in title:
+        for entry in bib_details.get("doi_network") or []:
+            items.append(
+                {"label": f"Ref. {entry['number']}", "value": entry["doi_url"], "extra": entry["summary"][:120]}
+            )
+
+    if not items and finding.evidence:
+        for line in finding.evidence.splitlines()[:15]:
+            if line.strip():
+                items.append({"label": "Detalle", "value": line.strip()})
+    return items
+
+
+def build_main_reason(findings: list[Finding], chapter_reviews: list[dict]) -> str:
+    pending = [r for r in chapter_reviews if not r["ok"]]
+    if pending:
+        titles = [r["title"] for r in pending[:4]]
+        return f"Se requiere revisar: {', '.join(titles)}."
+
+    themes: list[str] = []
+    for finding in findings[:6]:
+        blob = f"{finding.title} {finding.detail}".lower()
+        for theme, hints in THEME_KEYWORDS.items():
+            if any(h in blob for h in hints) and theme not in themes:
+                themes.append(theme)
+    if len(themes) >= 2:
+        return f"Se detectaron aspectos a revisar en {' y '.join(themes[:3])}."
+    if themes:
+        return f"Se detectaron aspectos a revisar en {themes[0]}."
+    if findings:
+        return display_title(findings[0]).rstrip(".") + "."
+    return "No se detectaron problemas prioritarios."
+
+
+def build_warnings_list(report: AuditReport, bib_details: dict | None = None) -> list[dict]:
+    bib_details = bib_details or {}
+    items: list[dict] = []
+    seen: set[str] = set()
+    for finding in report.findings:
+        if finding.severity not in ("error", "warning"):
+            continue
+        title = display_title(finding)
+        if title in seen:
+            continue
+        seen.add(title)
+        detail_items = _warning_detail_items(finding, bib_details)
+        items.append(
+            {
+                "title": title,
+                "severity": finding.severity,
+                "gravity": gravity_label(finding.severity),
+                "detail": finding.detail,
+                "why": finding.why,
+                "how_to_fix": finding.how_to_fix,
+                "area": finding.area or finding.module,
+                "detail_items": detail_items,
+                "finding_title_raw": finding.title,
+            }
+        )
+    order = {"error": 0, "warning": 1}
+    items.sort(key=lambda x: order.get(x["severity"], 9))
+    return items
+
+
+def build_jury_assessment(report: AuditReport, warnings: list[dict]) -> dict:
     strengths: list[str] = []
     weaknesses: list[str] = []
 
-    priority_ok = [
-        "Metodología con componentes principales",
-        "Introducción estructuralmente completa",
-        "Correspondencia citas APA ↔ bibliografía",
-        "Correspondencia citas ↔ bibliografía",
-        "Figuras citadas en el texto",
-        "Coherencia metodológica",
-        "Extensión dentro del rango esperado",
-    ]
-    priority_bad = [
-        "Posible desajuste cita ↔ contenido del párrafo",
-        "Citas APA sin coincidencia exacta en bibliografía",
-        "Respuesta a la pregunta de investigación poco explícita",
-        "Pregunta no respondida explícitamente en conclusiones",
-        "Conclusiones no responden explícitamente la pregunta",
-        "Referencias posiblemente ajenas al tema central",
-        "Abundancia de párrafos breves",
-    ]
-
     for finding in report.findings:
-        if finding.severity == "ok" and any(p in finding.title for p in priority_ok):
-            strengths.append(finding.title)
-        if finding.severity in ("error", "warning") and any(p in finding.title for p in priority_bad):
-            weaknesses.append(finding.title)
+        if finding.severity == "ok" and finding.title in STRENGTH_LABELS:
+            label = STRENGTH_LABELS[finding.title]
+            if label not in strengths:
+                strengths.append(label)
+
+    for warning in warnings[:5]:
+        raw = warning["title"].rstrip(".")
+        for key, label in WEAKNESS_LABELS.items():
+            if key in raw or raw.startswith(key[:20]):
+                if label not in weaknesses:
+                    weaknesses.append(label)
+                break
+        else:
+            if raw not in weaknesses:
+                weaknesses.append(raw)
 
     if not strengths:
-        strengths = [f.title for f in report.findings if f.severity == "ok"][:3]
+        strengths = ["Estructura general del trabajo reconocible"]
     if not weaknesses:
-        weaknesses = [f.title for f in report.findings if f.severity in ("error", "warning")][:3]
+        weaknesses = ["Sin debilidades críticas detectadas automáticamente"]
 
     errors = sum(1 for f in report.findings if f.severity == "error")
-    warnings = sum(1 for f in report.findings if f.severity == "warning")
+    warnings_count = len(warnings)
     score = report.score
 
-    if score >= 85 and errors == 0 and warnings <= 1:
+    if score >= 85 and errors == 0 and warnings_count <= 1:
         probability = "Alta"
     elif score >= 70 and errors == 0:
         probability = "Media-alta"
@@ -110,61 +283,52 @@ def build_jury_assessment(report: AuditReport) -> dict:
     }
 
 
-def build_submission_checklist(report: AuditReport, structure: dict, bib_dashboard: dict) -> dict:
-    def section_ok(name: str, required_labels: set[str] | None = None) -> bool:
-        block = structure.get(name, {})
-        checks = block.get("checks", [])
-        if not checks:
-            return block.get("present", False)
-        if required_labels is None:
-            required_labels = {c["label"] for c in checks}
-        required = [c for c in checks if c["label"] in required_labels]
-        return all(c["ok"] for c in required) if required else block.get("present", False)
+def build_submission_checklist(chapter_reviews: list[dict]) -> dict:
+    items = []
+    for review in chapter_reviews:
+        if review["ok"]:
+            label = f"{review['title']} completo"
+            mark_ok = True
+        elif review.get("partial"):
+            label = f"{review['title']} — revisión parcial recomendada"
+            mark_ok = False
+        else:
+            label = f"{review['title']} — requiere revisión"
+            mark_ok = False
 
-    intro_ok = section_ok("introduccion", {"pregunta", "objetivos", "problema"})
-    objectives_ok = section_ok("introduccion", {"objetivos"}) or bool(report.metadata.get("objectives"))
-    method_ok = section_ok("metodologia", {"diseño", "muestra", "variables"})
-    results_ok = structure.get("resultados", {}).get("present", False)
-    discussion_ok = structure.get("discusion", {}).get("present", False)
-    conclusions_ok = structure.get("conclusiones", {}).get("present", False)
-    bib_ok = bib_dashboard.get("unmatched_citations", 0) <= 5
-    question_ok = not any(
-        f.title.startswith("Pregunta no respondida") or f.title.startswith("Conclusiones no responden")
-        for f in report.findings
-        if f.severity == "warning"
-    )
+        items.append(
+            {
+                "label": label,
+                "ok": mark_ok,
+                "partial": review.get("partial", False),
+                "warning": not review["ok"],
+                "section_key": review["key"],
+                "summary": review.get("summary", ""),
+                "why": review.get("why", ""),
+                "how_to_fix": review.get("how_to_fix", ""),
+                "missing": review.get("missing", []) + review.get("partial_items", []),
+            }
+        )
 
-    items = [
-        {"label": "Introducción completa", "ok": intro_ok},
-        {"label": "Objetivos completos", "ok": objectives_ok},
-        {"label": "Metodología completa", "ok": method_ok},
-        {"label": "Resultados completos", "ok": results_ok},
-        {"label": "Discusión completa", "ok": discussion_ok},
-        {"label": "Conclusiones completas", "ok": conclusions_ok},
-        {"label": "Bibliografía requiere revisión", "ok": bib_ok, "warning": not bib_ok},
-        {"label": "Conclusiones responden la pregunta", "ok": question_ok, "warning": not question_ok},
-    ]
-
-    core_items = items[:6]
-    secondary_items = items[6:]
-    core_ok = sum(1 for i in core_items if i["ok"])
-    secondary_warnings = sum(1 for i in secondary_items if not i["ok"])
-
-    if core_ok == len(core_items) and secondary_warnings == 0:
-        status = "Lista para presentar"
-    elif core_ok >= 5 and secondary_warnings <= 2:
-        status = "Apta con correcciones menores"
-    elif core_ok >= 4:
-        status = "Requiere revisión antes de presentar"
-    else:
-        status = "No apta para presentar"
-
+    status = checklist_status_from_reviews(chapter_reviews)
     return {"items": items, "status": status}
 
 
 def prioritize_findings(report: AuditReport) -> list[Finding]:
-    order = {"error": 0, "warning": 1, "info": 2, "ok": 3}
-    actionable = [f for f in report.findings if f.severity in ("error", "warning", "info")]
+    order = {"error": 0, "warning": 1, "info": 2}
+    hidden_titles = {
+        "Estilo de citación detectado: APA",
+        "Estilo de citación detectado: NUMBERED",
+        "Pregunta de investigación detectada",
+        "Pregunta claramente formulada",
+        "Objetivos específicos detectados",
+    }
+    actionable = [
+        f
+        for f in report.findings
+        if f.severity in ("error", "warning", "info")
+        and not any(h in f.title for h in hidden_titles)
+    ]
     return sorted(actionable, key=lambda f: (order.get(f.severity, 9), f.title))
 
 
@@ -172,17 +336,26 @@ def build_dashboard(report: AuditReport, parsed: dict, extras: dict) -> dict:
     for finding in report.findings:
         enrich_finding(finding)
 
-    errors = sum(1 for f in report.findings if f.severity == "error")
-    warnings = sum(1 for f in report.findings if f.severity == "warning")
-    emoji, status_label, readiness = presentation_status(report.score, errors, warnings)
-    interpretation = icao_interpretation(report.score)
-
+    bib_details = extras.get("bibliography_details") or {}
+    warnings_list = build_warnings_list(report, bib_details)
+    errors = sum(1 for w in warnings_list if w["severity"] == "error")
+    warnings = sum(1 for w in warnings_list if w["severity"] == "warning")
     prioritized = prioritize_findings(report)
-    main_reason = prioritized[0].title if prioritized else "No se detectaron problemas prioritarios."
 
-    bib_dashboard = build_bibliography_dashboard(report, parsed)
-    jury = build_jury_assessment(report)
-    checklist = build_submission_checklist(report, extras.get("structure", {}), bib_dashboard)
+    bib_dashboard = build_bibliography_dashboard(report, bib_details)
+    chapter_reviews = build_chapter_reviews(
+        extras.get("structure", {}),
+        bib_dashboard,
+        warnings_list,
+        bool(report.metadata.get("objectives")),
+    )
+    checklist = build_submission_checklist(chapter_reviews)
+    readiness = checklist["status"]
+    emoji = readiness_emoji(readiness)
+    status_label = readiness
+    main_reason = build_main_reason(prioritized, chapter_reviews)
+    jury = build_jury_assessment(report, warnings_list)
+    interpretation = icao_interpretation(report.score)
 
     return {
         "icai": report.score,
@@ -193,6 +366,7 @@ def build_dashboard(report: AuditReport, parsed: dict, extras: dict) -> dict:
         "main_reason": main_reason,
         "errors": errors,
         "warnings": warnings,
+        "warnings_list": warnings_list,
         "prioritized_findings": prioritized,
         "structure": extras.get("structure", {}),
         "objectives_evaluation": extras.get("objectives_evaluation", []),
@@ -202,6 +376,7 @@ def build_dashboard(report: AuditReport, parsed: dict, extras: dict) -> dict:
         "bibliography_dashboard": bib_dashboard,
         "jury": jury,
         "checklist": checklist,
+        "chapter_reviews": chapter_reviews,
     }
 
 
@@ -209,11 +384,14 @@ def findings_dataframe_rows(report: AuditReport) -> list[dict]:
     rows = []
     for finding in report.findings:
         enrich_finding(finding)
+        if finding.severity == "ok":
+            continue
         rows.append(
             {
                 "Área": finding.area or finding.module,
                 "Severidad": severity_label(finding.severity),
-                "Hallazgo": finding.title,
+                "Gravedad": gravity_label(finding.severity),
+                "Hallazgo": display_title(finding),
                 "Qué significa": finding.detail,
                 "Por qué importa": finding.why,
                 "Cómo corregir": finding.how_to_fix,

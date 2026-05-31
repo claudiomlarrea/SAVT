@@ -102,6 +102,10 @@ def parse_bibliography(bib_text: str) -> dict[int, ReferenceEntry]:
         doi_match = re.search(r"doi[:.]?\s*(10\.\S+)", raw, re.IGNORECASE)
         pmid_match = re.search(r"PMID:\s*(\d+)", raw, re.IGNORECASE)
         year_match = re.search(r"\b(19|20)\d{2}\b", raw)
+        year = year_match.group(0) if year_match else ""
+        if year and not (1900 <= int(year) <= 2030):
+            paren_year = re.search(r"\((\d{4}[a-z]?)\)", raw)
+            year = paren_year.group(1)[:4] if paren_year else ""
         title = raw
         if ". " in raw:
             title = raw.split(". ", 1)[1][:180]
@@ -111,7 +115,7 @@ def parse_bibliography(bib_text: str) -> dict[int, ReferenceEntry]:
             title=title,
             doi=doi_match.group(1).rstrip(".,;") if doi_match else "",
             pmid=pmid_match.group(1) if pmid_match else "",
-            year=year_match.group(0) if year_match else "",
+            year=year,
         )
         current_num = None
         buffer = []

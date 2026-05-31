@@ -43,7 +43,11 @@ def audit_research_question(parsed: dict) -> tuple[list[Finding], dict]:
     checks = [
         {"label": "Claramente formulada", "ok": well_formed},
         {"label": "Aparece en introducción", "ok": in_intro},
-        {"label": "Se responde en conclusiones", "ok": answered, "partial": not answered and token_hits >= 1},
+        {
+            "label": "Se responde explícitamente en conclusiones",
+            "ok": answered,
+            "partial": not answered and token_hits >= 1,
+        },
     ]
 
     if well_formed:

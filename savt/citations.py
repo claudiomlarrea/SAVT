@@ -154,18 +154,7 @@ def _audit_apa_citations(parsed: dict, keywords: list[str]) -> list[Finding]:
 
     missing_in_bib = sorted(key for key in cited_keys if not apa_keys_match(key, bib_keys))
     if missing_in_bib:
-        findings.append(
-            Finding(
-                module="Bibliografía",
-                severity="warning",
-                title="Citas APA sin coincidencia exacta en bibliografía",
-                detail=(
-                    f"{len(missing_in_bib)} citas autor-año del texto no coinciden "
-                    "automáticamente con una entrada (puede deberse a 'et al.' o variaciones)."
-                ),
-                evidence=", ".join(missing_in_bib[:12]),
-            )
-        )
+        pass  # Detalle completo en bibliography_analysis.py
 
     uncited = sorted(key for key in bib_keys if not any(apa_keys_match(key, {cited}) for cited in cited_keys))
     if uncited and len(uncited) > len(bib_keys) * 0.35:
@@ -211,23 +200,14 @@ def audit_citations(parsed: dict) -> list[Finding]:
             Finding(
                 module="Bibliografía",
                 severity="error",
+                area="Bibliografía",
                 title="No se detectó bibliografía",
                 detail="No se encontró una sección BIBLIOGRAFÍA parseable al final del documento.",
+                why="Sin bibliografía no es posible verificar trazabilidad académica.",
+                how_to_fix="Agregue una sección final titulada BIBLIOGRAFÍA con referencias completas.",
             )
         )
         return findings
-
-    findings.append(
-        Finding(
-            module="Bibliografía",
-            severity="info",
-            area="Bibliografía",
-            title=f"Estilo de citación detectado: {style.upper()}",
-            detail=(
-                "Numerado Vancouver" if style == "numbered" else "Autor-año APA"
-            ),
-        )
-    )
 
     if style == "apa":
         findings.extend(_audit_apa_citations(parsed, keywords))
@@ -256,38 +236,6 @@ def audit_citations(parsed: dict) -> list[Finding]:
             n for n, ref in bibliography.items() if not is_reference_topical(ref, keywords)
         ]
         if irrelevant_refs and len(irrelevant_refs) > len(bibliography) * 0.15:
-            findings.append(
-                Finding(
-                    module="Bibliografía",
-                    severity="warning",
-                    title="Referencias posiblemente ajenas al tema central",
-                    detail=(
-                        f"{len(irrelevant_refs)} referencias no contienen términos clave "
-                        "inferidos del título/tema."
-                    ),
-                    evidence=f"Ejemplos: {irrelevant_refs[:12]}",
-                )
-            )
-
-    year_range = re.search(r"(20\d{2})\s*[–-]\s*(20\d{2})", body)
-    if year_range:
-        start_year = int(year_range.group(1))
-        pre_range = [
-            n
-            for n, ref in bibliography.items()
-            if ref.year and ref.year.isdigit() and int(ref.year) < start_year
-        ]
-        if pre_range:
-            findings.append(
-                Finding(
-                    module="Bibliografía",
-                    severity="info",
-                    title="Referencias anteriores al rango metodológico declarado",
-                    detail=(
-                        f"Se detectaron {len(pre_range)} referencias anteriores a {start_year}."
-                    ),
-                    evidence=f"Ejemplos: {pre_range[:10]}",
-                )
-            )
+            pass  # Detalle en bibliography_analysis.py
 
     return findings

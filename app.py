@@ -7,6 +7,7 @@ import streamlit as st
 
 from savt import __app_name__, __version__
 from savt.audit import run_audit
+from savt.export_docx import build_report_docx
 from savt.report_builder import findings_dataframe_rows
 from savt.taxonomy import AUDIT_AREAS, SEVERITY_LABELS
 
@@ -17,32 +18,52 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-SEVERITY_FILTER_OPTIONS = list(SEVERITY_LABELS.values())
+SEVERITY_FILTER_OPTIONS = [
+    "Errores críticos",
+    "Advertencias",
+    "Recomendaciones",
+]
 
 
 def render_header() -> None:
     st.title("SAVT")
-    st.caption(__app_name__)
+    st.caption(f"{__app_name__} · v{__version__}")
     st.markdown(
-        """
-        **Auditor académico institucional** para tesistas, directores y evaluadores.
-        Cada hallazgo indica *qué significa*, *por qué importa* y *cómo corregirlo*.
-        """
+        "Sistema de auditoría de tesis y trabajos finales. Diseñada para analizar "
+        "la estructura, coherencia y consistencia de todos los apartados del documento, "
+        "generando un informe de observaciones y recomendaciones para su mejora académica."
     )
 
 
-def render_sidebar() -> tuple[bool, int, int, int]:
+def render_sidebar(report=None, min_pages: int = 1, max_pages: int = 300) -> tuple[bool, int, int, int]:
     st.sidebar.header("Configuración")
     verify_online = st.sidebar.checkbox("Verificar DOI online (Crossref)", value=True)
-    max_doi = st.sidebar.slider("Máximo de DOI a verificar", 5, 75, 25)
-    min_pages = st.sidebar.number_input("Páginas mínimas objetivo", 40, 60, 50)
-    max_pages = st.sidebar.number_input("Páginas máximas objetivo", 70, 200, 150)
+    max_doi = st.sidebar.slider("Máximo de DOI a verificar", 5, 200, 25)
+    min_pages = st.sidebar.number_input(
+        "Páginas mínimas objetivo", min_value=1, max_value=300, value=min_pages
+    )
+    max_pages = st.sidebar.number_input(
+        "Páginas máximas objetivo", min_value=1, max_value=300, value=max_pages
+    )
+
+    if report:
+        with st.sidebar.expander("Datos técnicos del documento", expanded=False):
+            st.write(f"Palabras (cuerpo): {report.word_count:,}")
+            st.write(f"Referencias: {len(report.bibliography)}")
+            st.write(f"Estilo: {report.metadata.get('citation_style', '—').upper()}")
+            if report.metadata.get("file_type") == "pdf":
+                st.write(f"Páginas PDF: {report.metadata.get('pdf_page_count', '—')}")
+            else:
+                st.write(f"Páginas est.: {report.page_estimate}")
+            if report.page_estimate < min_pages or report.page_estimate > max_pages:
+                st.warning(f"Extensión fuera del rango {min_pages}–{max_pages} páginas.")
+
     st.sidebar.markdown("---")
-    st.sidebar.markdown(f"**Versión:** {__version__}")
+    st.sidebar.caption(f"Versión {__version__}")
     return verify_online, max_doi, min_pages, max_pages
 
 
-def render_check_icon(ok: bool, partial: bool = False) -> str:
+def icon(ok: bool, partial: bool = False) -> str:
     if ok:
         return "✔"
     if partial:
@@ -51,170 +72,290 @@ def render_check_icon(ok: bool, partial: bool = False) -> str:
 
 
 def render_verdict(dashboard: dict) -> None:
-    st.subheader("¿Mi tesis está lista para entregar?")
-
-    c1, c2, c3 = st.columns([1.2, 1.5, 1.3])
-    with c1:
-        st.metric("ICAI", f"{dashboard['icai']}/100")
-        st.caption(dashboard["icai_interpretation"])
-    with c2:
-        st.markdown(
-            f"### {dashboard['presentation_emoji']} {dashboard['presentation_status']}"
-        )
-        st.markdown(f"**Motivo principal:** {dashboard['main_reason']}")
-    with c3:
-        st.metric("Errores críticos", dashboard["errors"])
-        st.metric("Advertencias", dashboard["warnings"])
-
-    st.progress(min(dashboard["icai"], 100) / 100)
-
-    st.markdown(
-        """
-        | ICAI | Interpretación |
-        |------|----------------|
-        | 90–100 | Excelente |
-        | 80–89 | Muy buena |
-        | 70–79 | Apta con ajustes menores |
-        | 60–69 | Requiere revisión |
-        | <60 | No apta para presentación |
-        """
+    st.markdown("## ICAI — Índice de Conformidad Académica Institucional")
+    st.caption(
+        "Mide la preparación global de la tesis para presentación: estructura, coherencia, "
+        "bibliografía, citas y calidad formal. Es una guía de revisión previa a la entrega."
     )
+
+    left, right = st.columns([1, 1.4])
+    with left:
+        st.markdown(f"### **{dashboard['icai']}/100**")
+        st.markdown(f"**{dashboard['icai_interpretation']}**")
+        st.progress(min(dashboard["icai"], 100) / 100)
+        with st.expander("Escala ICAI", expanded=False):
+            st.markdown(
+                """
+                | ICAI | Interpretación |
+                |------|----------------|
+                | 90–100 | Excelente |
+                | 80–89 | Muy buena |
+                | 70–79 | Apta con ajustes menores |
+                | 60–69 | Requiere revisión |
+                | <60 | No apta para presentación |
+                """
+            )
+
+    with right:
+        st.markdown(f"### Estado general")
+        st.markdown(f"## {dashboard['presentation_emoji']} {dashboard['readiness']}")
+        st.markdown(f"**Motivo principal:** {dashboard['main_reason']}")
 
 
 def render_checklist(dashboard: dict) -> None:
+    from savt.chapter_reviews import CHECK_LABELS
+
     checklist = dashboard["checklist"]
-    st.subheader("Checklist previo a la entrega")
+    st.markdown("## Checklist previo a la entrega")
     st.markdown(f"**Estado:** {checklist['status']}")
 
-    cols = st.columns(2)
-    for idx, item in enumerate(checklist["items"]):
-        col = cols[idx % 2]
-        if item.get("warning") and not item["ok"]:
-            icon = "⚠"
-        elif item["ok"]:
-            icon = "✔"
+    for item in checklist["items"]:
+        if item["ok"]:
+            mark = "✔"
+        elif item.get("partial"):
+            mark = "⚠"
         else:
-            icon = "✖"
-        col.markdown(f"{icon} {item['label']}")
+            mark = "✖"
+
+        st.markdown(f"{mark} **{item['label']}**")
+
+        if not item["ok"] or item.get("partial"):
+            with st.expander(f"Qué revisar en {item['label'].split(' — ')[0]}", expanded=False):
+                st.write(item.get("summary", ""))
+                missing = item.get("missing") or []
+                if missing:
+                    st.markdown("**Elementos a reforzar:**")
+                    for label in missing:
+                        st.markdown(f"- {CHECK_LABELS.get(label, label)}")
+                if item.get("why"):
+                    st.markdown(f"**Por qué importa:** {item['why']}")
+                if item.get("how_to_fix"):
+                    st.info(f"**Cómo corregir:** {item['how_to_fix']}")
+        st.markdown("")
 
 
-def render_prioritized_warnings(dashboard: dict) -> None:
-    findings = [
-        f
-        for f in dashboard["prioritized_findings"]
-        if f.severity in ("error", "warning")
-    ]
-    if not findings:
-        st.success("No se detectaron errores críticos ni advertencias prioritarias.")
+def render_warnings(dashboard: dict) -> None:
+    warnings = dashboard.get("warnings_list") or []
+    bib_details = dashboard.get("bibliography_dashboard", {}).get("details") or {}
+    doi_help = bib_details.get("doi_help") or {}
+
+    if not warnings:
+        st.success("No se detectaron advertencias ni errores críticos prioritarios.")
         return
 
-    st.subheader(f"Qué corregir primero ({len(findings)} hallazgos)")
-    for idx, finding in enumerate(findings[:8], start=1):
-        severity = SEVERITY_LABELS.get(finding.severity, finding.severity)
-        st.markdown(f"**{idx}. {finding.title}** _({severity})_")
-        st.write(finding.detail)
-        if finding.why:
-            st.caption(f"Por qué importa: {finding.why}")
-        if finding.how_to_fix:
-            st.info(f"Cómo corregir: {finding.how_to_fix}")
+    st.markdown(f"## Advertencias detectadas ({len(warnings)})")
+    for idx, item in enumerate(warnings, start=1):
+        st.markdown(f"**{idx}. {item['title']}**")
+        st.caption(item["gravity"])
+        with st.expander("Ver detalle y cómo corregir", expanded=idx == 1):
+            st.write(item["detail"])
+
+            if "DOI inválidos" in item.get("finding_title_raw", ""):
+                st.markdown(doi_help.get("invalid", ""))
+                st.markdown(doi_help.get("not_resolved", ""))
+
+            detail_items = item.get("detail_items") or []
+            if detail_items:
+                st.markdown("**Referencias / citas a revisar:**")
+                for row in detail_items[:20]:
+                    st.markdown(f"- **{row['label']}:** {row['value']}")
+                    if row.get("extra"):
+                        st.caption(row["extra"])
+
+            if item.get("why"):
+                st.markdown(f"**Por qué importa:** {item['why']}")
+            if item.get("how_to_fix"):
+                st.info(f"**Cómo corregir:** {item['how_to_fix']}")
 
 
 def render_jury(dashboard: dict) -> None:
     jury = dashboard["jury"]
-    st.subheader("Evaluación como jurado")
+    st.markdown("## Evaluación por SAVT")
 
     c1, c2, c3 = st.columns(3)
     with c1:
         st.markdown("**Fortalezas principales**")
-        for idx, item in enumerate(jury["strengths"] or ["—"], start=1):
+        for idx, item in enumerate(jury["strengths"], start=1):
             st.write(f"{idx}. {item}")
     with c2:
         st.markdown("**Debilidades principales**")
-        for idx, item in enumerate(jury["weaknesses"] or ["—"], start=1):
+        for idx, item in enumerate(jury["weaknesses"], start=1):
             st.write(f"{idx}. {item}")
     with c3:
-        st.metric("Probabilidad estimada de aprobación", jury["approval_probability"])
+        st.markdown("**Probabilidad estimada de aprobación**")
+        st.markdown(f"## {jury['approval_probability']}")
 
 
 def render_structure(dashboard: dict) -> None:
+    from savt.chapter_reviews import CHECK_LABELS
+
+    chapter_reviews = dashboard.get("chapter_reviews") or []
+    if chapter_reviews:
+        st.markdown("## Revisión por capítulos")
+        for review in chapter_reviews:
+            if review["ok"]:
+                mark = "✔"
+            elif review.get("partial"):
+                mark = "⚠"
+            else:
+                mark = "✖"
+            st.markdown(f"### {mark} {review['title']}")
+            if review["ok"]:
+                st.caption(review.get("summary", "Apartado conforme."))
+                continue
+            st.write(review.get("summary", ""))
+            missing = review.get("missing", []) + review.get("partial_items", [])
+            if missing:
+                st.markdown("**Qué falta o no está claro:**")
+                for label in missing:
+                    st.markdown(f"- {CHECK_LABELS.get(label, label)}")
+            if review.get("why"):
+                st.markdown(f"**Por qué importa:** {review['why']}")
+            if review.get("how_to_fix"):
+                st.info(f"**Cómo corregir:** {review['how_to_fix']}")
+            st.markdown("")
+        return
+
     structure = dashboard["structure"]
-    st.subheader("Extracción estructural")
+    st.markdown("## Estructura del trabajo")
 
     sections = [
-        ("Introducción", "introduccion"),
-        ("Metodología", "metodologia"),
-        ("Resultados", "resultados"),
-        ("Discusión", "discusion"),
-        ("Conclusiones", "conclusiones"),
+        ("Introducción", "introduccion", ["problema", "justificación", "pregunta", "objetivos"]),
+        ("Marco teórico", "marco_teorico", ["marco presente", "marco desarrollado", "marco vinculado"]),
+        ("Metodología", "metodologia", ["diseño", "población", "muestra", "variables", "limitaciones"]),
+        ("Resultados", "resultados", ["presente"]),
+        ("Discusión", "discusion", ["presente"]),
+        ("Conclusiones", "conclusiones", ["responde objetivos", "responde la pregunta"]),
     ]
-    for title, key in sections:
+
+    for title, key, labels in sections:
         block = structure.get(key, {})
-        checks = block.get("checks", [])
-        with st.expander(title, expanded=False):
-            if not checks:
-                st.write(
-                    f"{render_check_icon(block.get('present', False))} "
-                    f"{'Sección detectada' if block.get('present') else 'Sección no detectada claramente'}"
-                )
-                continue
-            for check in checks:
-                partial = check.get("partial", False)
-                st.markdown(
-                    f"{render_check_icon(check['ok'], partial)} {check['label'].capitalize()}"
-                )
+        checks = {c["label"]: c for c in block.get("checks", [])}
+        st.markdown(f"**{title}**")
+        if not checks:
+            st.markdown(f"{icon(block.get('present', False))} {'Presente' if block.get('present') else 'No detectada claramente'}")
+            continue
+        st.markdown("*Tiene:*")
+        for label in labels:
+            check = checks.get(label, {})
+            partial = check.get("partial", False)
+            st.markdown(f"- {icon(check.get('ok', False), partial)} {label}")
+        st.markdown("")
 
 
 def render_research_question(dashboard: dict) -> None:
     block = dashboard.get("research_question", {})
     if not block.get("question"):
         return
-    st.subheader("Pregunta de investigación")
+    st.markdown("## Pregunta de investigación")
     st.markdown(f"**Pregunta detectada:** {block['question']}")
+    st.markdown("**Evaluación:**")
     for check in block.get("checks", []):
-        partial = check.get("partial", False)
-        st.markdown(
-            f"{render_check_icon(check['ok'], partial)} {check['label']}"
-        )
+        st.markdown(f"- {icon(check['ok'], check.get('partial', False))} {check['label']}")
 
 
 def render_objectives(dashboard: dict) -> None:
     evaluations = dashboard.get("objectives_evaluation") or []
     if not evaluations:
         return
-    st.subheader("Coherencia objetivos → resultados → conclusiones")
+    st.markdown("## Coherencia objetivos → resultados → conclusiones")
     for item in evaluations:
-        icon = render_check_icon(
-            item["status"] == "respondido",
-            partial=item["status"] == "parcialmente respondido",
-        )
-        st.markdown(f"**Objetivo específico {item['number']}** {icon} {item['status'].capitalize()}")
-        st.caption(item["text"][:220] + ("…" if len(item["text"]) > 220 else ""))
+        responded = item["status"] == "respondido"
+        partial = item["status"] == "parcialmente respondido"
+        label = {
+            "respondido": "Respondido",
+            "parcialmente respondido": "Parcialmente respondido",
+            "sin evidencia clara": "Sin evidencia clara",
+        }.get(item["status"], item["status"].capitalize())
+        st.markdown(f"**Objetivo específico {item['number']}** — {icon(responded, partial)} {label}")
+        st.caption(item["text"][:240] + ("…" if len(item["text"]) > 240 else ""))
 
 
-def render_bibliography_dashboard(dashboard: dict, report) -> None:
+def render_bibliography(dashboard: dict) -> None:
     bib = dashboard["bibliography_dashboard"]
-    st.subheader("Bibliografía")
+    details = bib.get("details") or {}
+    st.markdown("## Bibliografía")
 
-    lines = [
-        f"✔ Estilo {bib['style']} detectado",
+    summary_lines = [
+        f"✔ Estilo {bib['style']} correcto",
         f"✔ {bib['total_refs']} referencias",
-        f"✔ {bib['citations_found']} citas encontradas en el texto",
+        f"✔ {bib['citations_found']} citas encontradas",
     ]
     if bib["unmatched_citations"]:
-        lines.append(f"⚠ {bib['unmatched_citations']} citas no emparejadas")
+        summary_lines.append(f"⚠ {bib['unmatched_citations']} citas no emparejadas")
     else:
-        lines.append("✔ Citas emparejadas con bibliografía")
+        summary_lines.append("✔ Citas emparejadas con bibliografía")
     if bib["out_of_period"]:
-        lines.append(f"⚠ {bib['out_of_period']} referencias anteriores al período metodológico")
+        summary_lines.append(f"⚠ {bib['out_of_period']} referencias fuera del período metodológico")
     if bib["possibly_off_topic"]:
-        lines.append(
-            f"⚠ {bib['possibly_off_topic']} referencias podrían no relacionarse con el tema central"
+        summary_lines.append(
+            f"⚠ {bib['possibly_off_topic']} referencias podrían no estar relacionadas con el tema"
         )
-    coverage_icon = "✔" if bib["coverage"] == "adecuada" else "⚠"
-    lines.append(f"{coverage_icon} Cobertura bibliográfica {bib['coverage']}")
-
-    for line in lines:
+    coverage_ok = bib["coverage"] == "adecuada"
+    summary_lines.append(
+        f"{'✔' if coverage_ok else '⚠'} Cobertura bibliográfica {bib['coverage']}"
+    )
+    for line in summary_lines:
         st.markdown(line)
+
+    unmatched = details.get("unmatched_apa") or []
+    if unmatched:
+        with st.expander(f"Citas no emparejadas ({len(unmatched)})", expanded=True):
+            for entry in unmatched:
+                cites = ", ".join(entry["citations_in_text"])
+                st.markdown(f"- **En el texto:** {cites}")
+                st.caption(f"Clave detectada: `{entry['key']}` — {entry['hint']}")
+
+    out_of_period = details.get("out_of_period") or []
+    if out_of_period:
+        period = out_of_period[0].get("period_declared", "")
+        with st.expander(f"Referencias anteriores al período {period} ({len(out_of_period)})", expanded=False):
+            for entry in out_of_period[:20]:
+                st.markdown(f"- **Ref. {entry['number']} ({entry['year']}):** {entry['summary']}")
+
+    off_topic = details.get("off_topic") or []
+    if off_topic:
+        with st.expander(f"Referencias posiblemente ajenas al tema ({len(off_topic)})", expanded=False):
+            for entry in off_topic[:20]:
+                st.markdown(f"- **Ref. {entry['number']}:** {entry['summary']}")
+                st.caption(entry.get("reason", ""))
+
+    doi_invalid = details.get("doi_invalid") or []
+    doi_not_resolved = details.get("doi_not_resolved") or []
+    doi_network = details.get("doi_network") or []
+    doi_year = details.get("doi_year_mismatch") or []
+    doi_help = details.get("doi_help") or {}
+
+    if doi_invalid or doi_not_resolved:
+        with st.expander(
+            f"DOI inválidos ({len(doi_invalid)}) / no resueltos ({len(doi_not_resolved)})",
+            expanded=True,
+        ):
+            st.markdown(doi_help.get("invalid", ""))
+            for entry in doi_invalid:
+                st.markdown(f"- **Ref. {entry['number']}:** [{entry['doi_url']}]({entry['doi_url']})")
+                st.caption(entry["message"])
+            st.markdown(doi_help.get("not_resolved", ""))
+            for entry in doi_not_resolved:
+                st.markdown(f"- **Ref. {entry['number']}:** [{entry['doi_url']}]({entry['doi_url']})")
+                st.caption(f"{entry['message']} — {entry['summary'][:100]}…")
+
+    if doi_year:
+        with st.expander(f"Año distinto al registrado en Crossref ({len(doi_year)})", expanded=False):
+            st.markdown(doi_help.get("year_mismatch", ""))
+            for entry in doi_year:
+                st.markdown(
+                    f"- **Ref. {entry['number']}:** bibliografía **{entry['year_in_bibliography']}** "
+                    f"vs Crossref **{entry['year_in_crossref']}**"
+                )
+                st.markdown(f"  [{entry['doi_url']}]({entry['doi_url']})")
+                st.caption(entry["summary"])
+
+    if doi_network:
+        with st.expander(f"DOI no verificados por red ({len(doi_network)})", expanded=False):
+            st.markdown(doi_help.get("network", ""))
+            for entry in doi_network:
+                st.markdown(f"- **Ref. {entry['number']}:** [{entry['doi_url']}]({entry['doi_url']})")
 
 
 def render_figures_tables(dashboard: dict) -> None:
@@ -223,74 +364,79 @@ def render_figures_tables(dashboard: dict) -> None:
     if not figures and not tables:
         return
 
-    st.subheader("Figuras y tablas")
-    if figures:
-        st.markdown("**Figuras**")
-        for fig in figures:
-            st.markdown(f"**Figura {fig['number']}**")
-            st.markdown(
-                f"{render_check_icon(fig['has_number'])} Tiene número · "
-                f"{render_check_icon(fig['has_title'])} Tiene título · "
-                f"{render_check_icon(fig['cited_in_text'])} Citada en el texto · "
-                f"{render_check_icon(fig['has_source'])} Tiene fuente"
-            )
-            st.caption(fig["title"][:180])
-    if tables:
-        st.markdown("**Tablas**")
-        for tab in tables:
-            st.markdown(f"**Tabla {tab['number']}**")
-            st.markdown(
-                f"{render_check_icon(tab['has_number'])} Tiene número · "
-                f"{render_check_icon(tab['has_title'])} Tiene título · "
-                f"{render_check_icon(tab['cited_in_text'])} Mencionada en el texto · "
-                f"{render_check_icon(tab['has_source'])} Tiene fuente"
-            )
-            st.caption(tab["title"][:180])
+    st.markdown("## Figuras y tablas")
+    for fig in figures:
+        st.markdown(f"**Figura {fig['number']}**")
+        parts = []
+        if not fig["has_number"]:
+            parts.append("⚠ Sin número claro")
+        else:
+            parts.append("✔ Tiene número")
+        parts.append(f"{'✔' if fig['has_title'] else '⚠'} Tiene título")
+        parts.append(f"{'✔' if fig['cited_in_text'] else '⚠ No se menciona en el texto'}")
+        parts.append(f"{'✔' if fig['has_source'] else '⚠ No indica fuente'}")
+        st.markdown(" · ".join(parts))
+        st.caption(fig["title"][:180])
+
+    for tab in tables:
+        st.markdown(f"**Tabla {tab['number']}**")
+        parts = []
+        parts.append(f"{'✔' if tab['has_number'] else '⚠'} Numeración")
+        parts.append(f"{'✔' if tab['has_title'] else '⚠'} Título")
+        parts.append(f"{'✔' if tab['has_source'] else '⚠'} Fuente")
+        parts.append(f"{'✔' if tab['cited_in_text'] else '⚠'} Mención en texto")
+        st.markdown(" · ".join(parts))
+        st.caption(tab["title"][:180])
 
 
 def render_findings_table(report) -> None:
-    st.subheader("Detalle de hallazgos")
-    rows = findings_dataframe_rows(report)
-    df = pd.DataFrame(rows)
-    if df.empty:
-        st.info("No se generaron hallazgos.")
-        return
+    with st.expander("Detalle completo de hallazgos (filtros avanzados)", expanded=False):
+        rows = findings_dataframe_rows(report)
+        ok_rows = []
+        for finding in report.findings:
+            if finding.severity == "ok":
+                from savt.report_builder import display_title
+                from savt.taxonomy import enrich_finding, severity_label
 
-    c1, c2 = st.columns(2)
-    with c1:
-        severity_filter = st.multiselect(
-            "Mostrar",
-            options=SEVERITY_FILTER_OPTIONS,
-            default=SEVERITY_FILTER_OPTIONS,
-        )
-    with c2:
-        area_filter = st.multiselect(
-            "Áreas a revisar",
-            options=AUDIT_AREAS,
-            default=AUDIT_AREAS,
-        )
+                enrich_finding(finding)
+                ok_rows.append(
+                    {
+                        "Área": finding.area or finding.module,
+                        "Severidad": severity_label(finding.severity),
+                        "Hallazgo": display_title(finding),
+                        "Qué significa": finding.detail,
+                    }
+                )
 
-    filtered = df[df["Severidad"].isin(severity_filter) & df["Área"].isin(area_filter)]
-    st.dataframe(filtered, use_container_width=True, hide_index=True)
+        df = pd.DataFrame(rows)
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            severity_filter = st.multiselect(
+                "Mostrar",
+                options=SEVERITY_FILTER_OPTIONS + ["Aspectos conformes"],
+                default=SEVERITY_FILTER_OPTIONS,
+            )
+        with c2:
+            area_filter = st.multiselect(
+                "Áreas a revisar",
+                options=AUDIT_AREAS,
+                default=AUDIT_AREAS,
+            )
+        with c3:
+            show_ok = st.checkbox("Incluir aspectos conformes", value=False)
 
-    for area in area_filter:
-        subset = filtered[filtered["Área"] == area]
-        if subset.empty:
-            continue
-        with st.expander(f"{area} ({len(subset)} hallazgos)", expanded=False):
-            for _, row in subset.iterrows():
-                st.markdown(f"**{row['Hallazgo']}** — _{row['Severidad']}_")
-                st.write(row["Qué significa"])
-                if row["Por qué importa"]:
-                    st.caption(f"Por qué importa: {row['Por qué importa']}")
-                if row["Cómo corregir"]:
-                    st.info(f"Cómo corregir: {row['Cómo corregir']}")
-                if row["Evidencia"]:
-                    st.code(row["Evidencia"])
+        if show_ok:
+            df = pd.concat([df, pd.DataFrame(ok_rows)], ignore_index=True)
+        filtered = df[df["Severidad"].isin(severity_filter) & df["Área"].isin(area_filter)]
+        st.dataframe(filtered, use_container_width=True, hide_index=True)
 
 
 def render_bibliography_table(report) -> None:
-    with st.expander("Bibliografía parseada (detalle técnico)", expanded=False):
+    with st.expander("Listado completo de referencias detectadas", expanded=False):
+        st.caption(
+            "Cada fila es una referencia que el sistema extrajo de la bibliografía de su tesis: "
+            "si está citada en el texto, año, DOI y texto de la entrada."
+        )
         if not report.bibliography:
             st.warning("No se detectaron referencias.")
             return
@@ -314,26 +460,10 @@ def render_bibliography_table(report) -> None:
         st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 
 
-def render_summary_meta(report, min_pages: int, max_pages: int) -> None:
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Palabras (cuerpo)", f"{report.word_count:,}")
-    c2.metric("Referencias", len(report.bibliography))
-    c3.metric("Estilo citación", report.metadata.get("citation_style", "—").upper())
-    if report.metadata.get("file_type") == "pdf":
-        c4.metric("Páginas PDF", report.metadata.get("pdf_page_count", "—"))
-    else:
-        c4.metric("Páginas est.", f"{report.page_estimate}")
-
-    if report.page_estimate < min_pages or report.page_estimate > max_pages:
-        st.warning(
-            f"Extensión estimada ({report.page_estimate} páginas) fuera del rango "
-            f"configurado ({min_pages}–{max_pages}). Confirmar en el PDF final."
-        )
-
-
 def main() -> None:
     render_header()
-    verify_online, max_doi, min_pages, max_pages = render_sidebar()
+    report = st.session_state.get("report")
+    verify_online, max_doi, min_pages, max_pages = render_sidebar(report, 1, 300)
 
     uploaded = st.file_uploader(
         "Subir tesis (.docx o .pdf)",
@@ -343,16 +473,6 @@ def main() -> None:
 
     if not uploaded:
         st.info("Suba un archivo .docx o .pdf para iniciar la auditoría académica.")
-        st.markdown(
-            """
-            ### Qué evalúa SAVT
-            - Estructura académica (introducción, metodología, resultados, discusión, conclusiones)
-            - Coherencia pregunta → objetivos → resultados → conclusiones
-            - Bibliografía, citas, figuras y tablas
-            - Redacción, extensión y checklist previo a la entrega
-            - Evaluación orientada a tesista, director y jurado
-            """
-        )
         return
 
     if st.button("Ejecutar auditoría", type="primary", use_container_width=True):
@@ -364,38 +484,55 @@ def main() -> None:
                 max_doi_checks=max_doi,
             )
         st.session_state["report"] = report
+        st.rerun()
 
     report = st.session_state.get("report")
     if not report or report.filename != uploaded.name:
         return
 
     dashboard = report.metadata.get("dashboard", {})
-    render_verdict(dashboard)
-    render_summary_meta(report, min_pages, max_pages)
+    if not dashboard:
+        st.error("Informe incompleto. Vuelva a ejecutar la auditoría.")
+        return
 
-    st.markdown("---")
+    render_verdict(dashboard)
+    st.divider()
     render_checklist(dashboard)
-    st.markdown("---")
-    render_prioritized_warnings(dashboard)
-    st.markdown("---")
+    st.divider()
+    render_warnings(dashboard)
+    st.divider()
     render_jury(dashboard)
-    st.markdown("---")
+    st.divider()
     render_structure(dashboard)
     render_research_question(dashboard)
     render_objectives(dashboard)
-    render_bibliography_dashboard(dashboard, report)
+    render_bibliography(dashboard)
     render_figures_tables(dashboard)
-    st.markdown("---")
+    st.divider()
     render_findings_table(report)
     render_bibliography_table(report)
 
+    base_name = uploaded.name.rsplit(".", 1)[0]
+    col_csv, col_docx = st.columns(2)
+
     csv = pd.DataFrame(findings_dataframe_rows(report)).to_csv(index=False).encode("utf-8")
-    st.download_button(
-        "Descargar informe CSV",
-        data=csv,
-        file_name=f"informe_savt_{uploaded.name.rsplit('.', 1)[0]}.csv",
-        mime="text/csv",
-    )
+    with col_csv:
+        st.download_button(
+            "Descargar informe CSV",
+            data=csv,
+            file_name=f"informe_savt_{base_name}.csv",
+            mime="text/csv",
+            use_container_width=True,
+        )
+    with col_docx:
+        docx_bytes = build_report_docx(report, dashboard)
+        st.download_button(
+            "Descargar informe Word (.docx)",
+            data=docx_bytes,
+            file_name=f"informe_savt_{base_name}.docx",
+            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            use_container_width=True,
+        )
 
 
 if __name__ == "__main__":

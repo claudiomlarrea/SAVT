@@ -58,13 +58,19 @@ def audit_structure(parsed: dict) -> tuple[list[Finding], dict]:
     conclusions = parsed.get("conclusions", "")
 
     intro = _find_block(body, sections, ["introduc", "planteamiento", "1.4", "1.5"])
-    method = _find_block(body, sections, ["metodolog", "metodo"])
+    method = _find_block(body, sections, ["metodolog", "metodo", "materiales y métodos", "material y metodo"])
+    marco = _find_block(
+        body,
+        sections,
+        ["marco teórico", "marco teorico", "marco conceptual", "fundament", "estado del arte", "referencial teórico"],
+    )
     results = _find_block(body, sections, ["resultado"])
     discussion = _find_block(body, sections, ["discusi"])
     conclusions_block = conclusions or _find_block(body, sections, ["conclus"])
 
     intro_scope = body[:20000] if parsed.get("research_questions") else (intro or body[:20000])
     method_scope = method or body
+    marco_scope = marco or body
 
     intro_checks = _merge_intro_checks(
         _check_items(
@@ -81,13 +87,23 @@ def audit_structure(parsed: dict) -> tuple[list[Finding], dict]:
     method_checks = _check_items(
         method_scope,
         [
-            ("diseño", ["diseño", "diseno", "enfoque", "tipo de estudio", "metodología", "metodologia", "modelo empírico", "modelo empirico"]),
+            ("diseño", ["diseño", "diseno", "enfoque", "tipo de estudio", "metodología", "metodologia", "modelo empírico", "modelo empirico", "materiales y métodos"]),
             ("población", ["población", "poblacion", "universo", "ámbito", "ambito", "contexto"]),
-            ("muestra", ["muestra", "casos", "participantes", "dataset", "datos", "microdatos"]),
+            ("muestra", ["muestra", "casos", "participantes", "dataset", "datos", "microdatos", "eph", "encuesta"]),
             ("variables", ["variable", "indicador", "dimensión", "dimension"]),
             ("limitaciones", ["limitación", "limitacion", "delimitación", "delimitacion", "alcance"]),
         ],
     )
+    marco_checks = _check_items(
+        marco_scope,
+        [
+            ("marco presente", ["marco teórico", "marco teorico", "marco conceptual", "fundamentación teórica", "marco referencial"]),
+            ("marco desarrollado", ["autor", "autores", "concepto", "teoría", "teoria", "paradigma", "enfoque teórico"]),
+            ("marco vinculado", ["pregunta", "objetivo", "problema", "investigación", "investigacion", "hipótesis", "hipotesis"]),
+        ],
+    )
+    if marco and len(marco) > 400:
+        marco_checks = [{**c, "ok": c["ok"] or True} if c["label"] == "marco presente" else c for c in marco_checks]
     results_checks = [{"label": "presente", "ok": len(results) > 400}]
     discussion_checks = [{"label": "presente", "ok": len(discussion) > 400}]
 
@@ -114,7 +130,8 @@ def audit_structure(parsed: dict) -> tuple[list[Finding], dict]:
     ]
 
     dashboard = {
-        "introduccion": {"checks": intro_checks, "present": bool(intro)},
+        "introduccion": {"checks": intro_checks, "present": bool(intro or intro_scope)},
+        "marco_teorico": {"checks": marco_checks, "present": bool(marco and len(marco) > 300)},
         "metodologia": {"checks": method_checks, "present": bool(method)},
         "resultados": {"checks": results_checks, "present": bool(results)},
         "discusion": {"checks": discussion_checks, "present": bool(discussion)},
@@ -150,13 +167,16 @@ def audit_structure(parsed: dict) -> tuple[list[Finding], dict]:
     method_missing = [c["label"] for c in method_checks if not c["ok"]]
     method_core_missing = [c for c in method_missing if c in {"diseño", "muestra", "variables"}]
     if method_core_missing:
+        from savt.chapter_reviews import CHECK_LABELS
+
+        missing_names = ", ".join(CHECK_LABELS.get(m, m) for m in method_core_missing)
         findings.append(
             Finding(
                 module="Metodología",
-                severity="warning" if "diseño" in method_missing else "info",
+                severity="warning" if "diseño" in method_core_missing else "info",
                 area="Metodología",
                 title="Metodología con elementos faltantes",
-                detail=f"No detectados claramente: {', '.join(method_core_missing)}.",
+                detail=f"No detectados claramente: {missing_names}.",
                 why="La metodología debe permitir evaluar validez y reproducibilidad del estudio.",
                 how_to_fix="Agregue subsecciones explícitas para diseño, población/muestra, variables y limitaciones.",
             )
@@ -169,6 +189,32 @@ def audit_structure(parsed: dict) -> tuple[list[Finding], dict]:
                 area="Metodología",
                 title="Metodología con componentes principales",
                 detail="Diseño, población, muestra, variables y limitaciones detectados.",
+            )
+        )
+
+    marco_missing = [c["label"] for c in marco_checks if not c["ok"]]
+    if marco_missing and not dashboard["marco_teorico"]["present"]:
+        findings.append(
+            Finding(
+                module="Estructura",
+                severity="warning",
+                area="Estructura",
+                title="Marco teórico no detectado o insuficiente",
+                detail="No se identificó un marco teórico desarrollado con claridad.",
+                why="El marco teórico sustenta conceptos, autores y debates del estudio.",
+                how_to_fix="Incluya un capítulo de marco teórico vinculado a su pregunta de investigación.",
+            )
+        )
+    elif marco_missing:
+        findings.append(
+            Finding(
+                module="Estructura",
+                severity="info",
+                area="Estructura",
+                title="Marco teórico mejorable",
+                detail=f"Aspectos a reforzar: {', '.join(marco_missing)}.",
+                why="Un marco bien articulado conecta teoría, pregunta y resultados.",
+                how_to_fix="Profundice autores clave y cierre el marco hacia su problema de investigación.",
             )
         )
 
