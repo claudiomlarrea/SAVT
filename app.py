@@ -239,8 +239,16 @@ def render_structure(dashboard: dict) -> None:
         ("Introducción", "introduccion", ["problema", "justificación", "pregunta", "objetivos"]),
         ("Marco teórico", "marco_teorico", ["marco presente", "marco desarrollado", "marco vinculado"]),
         ("Metodología", "metodologia", ["diseño", "población", "muestra", "variables", "limitaciones"]),
-        ("Resultados", "resultados", ["presente"]),
-        ("Discusión", "discusion", ["presente"]),
+        ("Resultados", "resultados", ["resultados presente", "resultados desarrollo"]),
+        ("Discusión", "discusion", [
+            "discusion presente",
+            "discusion desarrollo",
+            "interpretación",
+            "confronta literatura",
+            "vincula objetivos",
+            "limitaciones discusion",
+            "implicaciones",
+        ]),
         ("Conclusiones", "conclusiones", ["responde objetivos", "responde la pregunta"]),
     ]
 

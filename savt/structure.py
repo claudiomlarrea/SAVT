@@ -51,6 +51,97 @@ def _merge_intro_checks(checks: list[dict], parsed: dict) -> list[dict]:
     return merged
 
 
+def _build_discussion_checks(discussion: str) -> list[dict]:
+    if not discussion or len(discussion) < 80:
+        return [
+            {"label": "discusion presente", "ok": False},
+            {"label": "discusion desarrollo", "ok": False},
+            {"label": "interpretación", "ok": False},
+            {"label": "confronta literatura", "ok": False},
+            {"label": "vincula objetivos", "ok": False},
+            {"label": "limitaciones discusion", "ok": False},
+            {"label": "implicaciones", "ok": False},
+        ]
+
+    content_checks = _check_items(
+        discussion,
+        [
+            (
+                "interpretación",
+                [
+                    "interpret",
+                    "significado",
+                    "explic",
+                    "explica",
+                    "comprens",
+                    "analiza",
+                    "sentido",
+                    "sugiere",
+                    "evidencia",
+                ],
+            ),
+            (
+                "confronta literatura",
+                [
+                    "literatura",
+                    "estudios previos",
+                    "investigaciones previas",
+                    "trabajos previos",
+                    "autores",
+                    "concuerda",
+                    "coincide",
+                    "difiere",
+                    "contradice",
+                    "similar",
+                    "compar",
+                    "contrast",
+                    "frente a",
+                    "respecto a",
+                    "en línea con",
+                    "en linea con",
+                ],
+            ),
+            (
+                "vincula objetivos",
+                [
+                    "objetivo",
+                    "pregunta",
+                    "propósito",
+                    "proposito",
+                    "finalidad",
+                    "hallazgo",
+                    "meta",
+                    "plantead",
+                ],
+            ),
+            (
+                "limitaciones discusion",
+                ["limitación", "limitacion", "sesgo", "delimit", "debilidad", "restric", "alcance"],
+            ),
+            (
+                "implicaciones",
+                [
+                    "implic",
+                    "recomend",
+                    "aporte",
+                    "contribuc",
+                    "proyecc",
+                    "futur",
+                    "práctic",
+                    "practic",
+                    "teóric",
+                    "teoric",
+                ],
+            ),
+        ],
+    )
+    return [
+        {"label": "discusion presente", "ok": True},
+        {"label": "discusion desarrollo", "ok": len(discussion) > 400},
+        *content_checks,
+    ]
+
+
 def audit_structure(parsed: dict) -> tuple[list[Finding], dict]:
     findings: list[Finding] = []
     body = parsed["body"]
@@ -104,8 +195,12 @@ def audit_structure(parsed: dict) -> tuple[list[Finding], dict]:
     )
     if marco and len(marco) > 400:
         marco_checks = [{**c, "ok": c["ok"] or True} if c["label"] == "marco presente" else c for c in marco_checks]
-    results_checks = [{"label": "presente", "ok": len(results) > 400}]
-    discussion_checks = [{"label": "presente", "ok": len(discussion) > 400}]
+
+    results_checks = [
+        {"label": "resultados presente", "ok": bool(results)},
+        {"label": "resultados desarrollo", "ok": len(results) > 400},
+    ]
+    discussion_checks = _build_discussion_checks(discussion)
 
     question_ok = any(c["ok"] for c in intro_checks if c["label"] == "pregunta") or bool(
         parsed.get("research_questions")
@@ -133,8 +228,8 @@ def audit_structure(parsed: dict) -> tuple[list[Finding], dict]:
         "introduccion": {"checks": intro_checks, "present": bool(intro or intro_scope)},
         "marco_teorico": {"checks": marco_checks, "present": bool(marco and len(marco) > 300)},
         "metodologia": {"checks": method_checks, "present": bool(method)},
-        "resultados": {"checks": results_checks, "present": bool(results)},
-        "discusion": {"checks": discussion_checks, "present": bool(discussion)},
+        "resultados": {"checks": results_checks, "present": bool(results), "length": len(results)},
+        "discusion": {"checks": discussion_checks, "present": bool(discussion), "length": len(discussion)},
         "conclusiones": {"checks": conclusion_checks, "present": bool(conclusions_block)},
     }
 
@@ -233,6 +328,15 @@ def audit_structure(parsed: dict) -> tuple[list[Finding], dict]:
                 )
             )
         else:
+            from savt.chapter_reviews import CHECK_GUIDANCE
+
+            disc_guide = CHECK_GUIDANCE["discusion presente"]
+            why = disc_guide["why"] if section_name == "Discusión" else (
+                "Es un capítulo obligatorio en la estructura académica estándar."
+            )
+            how = disc_guide["how_to_fix"] if section_name == "Discusión" else (
+                f"Incluya un capítulo o sección titulada '{section_name}' con subtítulos numerados."
+            )
             findings.append(
                 Finding(
                     module="Estructura",
@@ -240,8 +344,8 @@ def audit_structure(parsed: dict) -> tuple[list[Finding], dict]:
                     area="Estructura",
                     title=f"{label} no detectada",
                     detail=f"No se encontró una sección clara de {section_name.lower()}.",
-                    why="Es un capítulo obligatorio en la estructura académica estándar.",
-                    how_to_fix=f"Incluya un capítulo o sección titulada '{section_name}' con subtítulos numerados.",
+                    why=why,
+                    how_to_fix=how,
                 )
             )
 
