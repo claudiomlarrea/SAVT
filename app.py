@@ -54,7 +54,7 @@ def render_sidebar(report=None, min_pages: int = 1, max_pages: int = 300) -> tup
     st.sidebar.image(LOGO_PATH, width=120)
     st.sidebar.header("Configuración")
     verify_online = st.sidebar.checkbox("Verificar DOI online (Crossref)", value=True)
-    max_doi = st.sidebar.slider("Máximo de DOI a verificar", 5, 200, 25)
+    max_doi = st.sidebar.slider("Máximo de DOI a verificar", 5, 200, 200)
     min_pages = st.sidebar.number_input(
         "Páginas mínimas objetivo", min_value=1, max_value=300, value=min_pages
     )
