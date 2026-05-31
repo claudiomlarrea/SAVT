@@ -312,8 +312,8 @@ def build_discussion_review(block: dict) -> dict:
         )
     else:
         why_parts.append(
-            f"Según {ms.AUTHOR_REF}, la discusión no repite resultados: interpreta, vincula con "
-            "estudios previos y responde la pregunta y los objetivos del estudio."
+            "La discusión no repite resultados: interpreta, vincula con estudios previos "
+            "y responde la pregunta y los objetivos del estudio."
         )
         for label in missing + partial:
             guide = CHECK_GUIDANCE.get(label, {})
@@ -321,8 +321,6 @@ def build_discussion_review(block: dict) -> dict:
                 why_parts.append(guide["why"])
 
     why_text = " ".join(dict.fromkeys(why_parts))
-    if why_text and ms.AUTHOR_REF not in why_text:
-        why_text += f" Referencia: {ms.AUTHOR_REF}."
 
     how_parts: list[str] = []
     if "discusion presente" in missing:

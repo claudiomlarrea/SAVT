@@ -1,7 +1,5 @@
 """Referencias metodológicas — Hernández, Fernández y Baptista (6ª ed., 2014)."""
 
-AUTHOR_REF = "Hernández, Fernández y Baptista (2014, Metodología de la investigación, 6ª ed.)"
-
 # Cap. 1 — interpretación de análisis cuantitativos
 INTERPRETATION_DEFINITION = (
     "Los análisis cuantitativos se interpretan a la luz de las predicciones iniciales "
