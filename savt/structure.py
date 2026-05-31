@@ -66,20 +66,24 @@ def _build_discussion_checks(discussion: str) -> list[dict]:
     content_checks = _check_items(
         discussion,
         [
-            (
-                "interpretación",
-                [
-                    "interpret",
-                    "significado",
-                    "explic",
-                    "explica",
-                    "comprens",
-                    "analiza",
-                    "sentido",
-                    "sugiere",
-                    "evidencia",
-                ],
-            ),
+                (
+                    "interpretación",
+                    [
+                        "interpret",
+                        "significado",
+                        "explic",
+                        "explica",
+                        "comprens",
+                        "analiza",
+                        "sentido",
+                        "sugiere",
+                        "evidencia",
+                        "hipótesis",
+                        "hipotesis",
+                        "encajan",
+                        "conocimiento existente",
+                    ],
+                ),
             (
                 "confronta literatura",
                 [

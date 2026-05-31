@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from savt import methodology_sampieri as ms
+
 CHECK_LABELS: dict[str, str] = {
     "problema": "Planteamiento del problema",
     "justificación": "Justificación / relevancia",
@@ -90,53 +92,43 @@ CHECK_GUIDANCE: dict[str, dict[str, str]] = {
     },
     "discusion presente": {
         "why": (
-            "Según Hernández, Fernández y Baptista, la discusión cumple una función distinta a los "
-            "resultados: interpretar los hallazgos, confrontarlos con la literatura y argumentar su "
-            "significado frente a la pregunta de investigación."
+            f"{ms.ACADEMIC_REPORT_SECTIONS} {ms.RESULTS_VS_DISCUSSION} "
+            f"{ms.DISCUSSION_PURPOSE}"
         ),
         "how_to_fix": (
-            "Incluya un capítulo titulado «Discusión», separado de Resultados y Conclusiones, "
-            "con subtítulos numerados."
+            "Incluya un capítulo titulado «Discusión» (o equivalente académico), separado de "
+            "Resultados, donde interprete —no repita— los hallazgos."
         ),
     },
     "discusion desarrollo": {
         "why": (
-            "Una discusión breve o superficial suele limitarse a repetir resultados sin analizar "
-            "similitudes, diferencias ni causas posibles respecto de estudios previos."
+            f"{ms.RESULTS_VS_DISCUSSION} {ms.DISCUSSION_WRITING_QUALITY} "
+            "Una discusión escasa suele confundirse con resultados sin interpretación analítica."
         ),
         "how_to_fix": (
-            "Desarrolle párrafos analíticos que interpreten cada hallazgo relevante y lo compare "
-            "con autores citados en su marco teórico."
+            "Desarrolle párrafos que interpreten cada hallazgo relevante, lo vinculen con "
+            "hipótesis/objetivos y lo comparen con estudios previos citados en su marco teórico."
         ),
     },
     "interpretación": {
-        "why": (
-            "La discusión debe explicar el significado de los resultados —no solo reportarlos— "
-            "indicando qué aportan al problema estudiado."
-        ),
+        "why": ms.INTERPRETATION_DEFINITION,
         "how_to_fix": (
-            "Redacte párrafos que respondan «¿qué significa este hallazgo?» y «¿cómo se relaciona "
-            "con la pregunta de investigación?»."
+            "Explique cómo encajan sus resultados en el conocimiento existente y en las "
+            "predicciones o hipótesis planteadas al inicio del estudio."
         ),
     },
     "confronta literatura": {
-        "why": (
-            "Un evaluador académico espera que los resultados se contrasten con investigaciones "
-            "previas: coincidencias, divergencias y posibles explicaciones."
-        ),
+        "why": ms.LINK_PRIOR_STUDIES,
         "how_to_fix": (
-            "Cite autores del marco teórico y compare explícitamente sus postulados o hallazgos "
-            "con los suyos (concuerda, difiere, amplía, contradice)."
+            "Compare sus hallazgos con autores y estudios previos: señale coincidencias, "
+            "divergencias y posibles explicaciones."
         ),
     },
     "vincula objetivos": {
-        "why": (
-            "La discusión debe cerrar el ciclo metodológico retomando la pregunta y los objetivos "
-            "planteados al inicio del trabajo."
-        ),
+        "why": ms.DISCUSSION_PURPOSE,
         "how_to_fix": (
-            "Retome la pregunta de investigación y cada objetivo específico al interpretar los "
-            "resultados obtenidos."
+            "Indique explícitamente cómo responde cada hallazgo a la pregunta de investigación "
+            "y al cumplimiento de los objetivos específicos."
         ),
     },
     "limitaciones discusion": {
@@ -315,19 +307,22 @@ def build_discussion_review(block: dict) -> dict:
     if "discusion presente" in missing:
         why_parts.append(CHECK_GUIDANCE["discusion presente"]["why"])
         why_parts.append(
-            "Sin discusión, el evaluador no puede verificar si el tesista comprende sus propios "
-            "hallazgos ni si dialoga con el estado del arte planteado en el marco teórico."
+            "Sin un apartado de discusión autónomo, el evaluador no puede verificar si el trabajo "
+            "interpreta críticamente sus hallazgos o solo los reporta."
         )
     else:
         why_parts.append(
-            "En la estructura del reporte de investigación, la discusión es el espacio de "
-            "argumentación académica: interpreta resultados, los contrasta con autores previos "
-            "y explica su relevancia para la pregunta planteada."
+            f"Según {ms.AUTHOR_REF}, la discusión no repite resultados: interpreta, vincula con "
+            "estudios previos y responde la pregunta y los objetivos del estudio."
         )
         for label in missing + partial:
             guide = CHECK_GUIDANCE.get(label, {})
             if guide.get("why") and label not in {"discusion presente"}:
                 why_parts.append(guide["why"])
+
+    why_text = " ".join(dict.fromkeys(why_parts))
+    if why_text and ms.AUTHOR_REF not in why_text:
+        why_text += f" Referencia: {ms.AUTHOR_REF}."
 
     how_parts: list[str] = []
     if "discusion presente" in missing:
@@ -353,7 +348,7 @@ def build_discussion_review(block: dict) -> dict:
         "missing": missing,
         "partial_items": [p for p in partial if p not in missing],
         "summary": summary,
-        "why": " ".join(dict.fromkeys(why_parts)),
+        "why": why_text,
         "how_to_fix": " ".join(dict.fromkeys(how_parts)),
         "checks": checks,
     }
