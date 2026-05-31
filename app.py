@@ -10,6 +10,7 @@ from savt.audit import run_audit
 from savt.export_docx import build_report_docx
 from savt.report_builder import findings_dataframe_rows
 from savt.taxonomy import AUDIT_AREAS, SEVERITY_LABELS
+from savt.ui_branding import LOGO_PATH, inject_branding
 
 st.set_page_config(
     page_title="SAVT — Auditoría de Tesis",
@@ -17,6 +18,8 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
 )
+
+inject_branding()
 
 SEVERITY_FILTER_OPTIONS = [
     "Errores críticos",
@@ -26,16 +29,29 @@ SEVERITY_FILTER_OPTIONS = [
 
 
 def render_header() -> None:
-    st.title("SAVT")
-    st.caption(f"{__app_name__} · v{__version__}")
-    st.markdown(
-        "Sistema de auditoría de tesis y trabajos finales. Diseñada para analizar "
-        "la estructura, coherencia y consistencia de todos los apartados del documento, "
-        "generando un informe de observaciones y recomendaciones para su mejora académica."
-    )
+    logo_col, hero_col = st.columns([1, 4], vertical_alignment="center")
+    with logo_col:
+        st.image(LOGO_PATH, width=130)
+    with hero_col:
+        st.markdown(
+            f"""
+            <div class="savt-hero">
+                <h1>SAVT</h1>
+                <p class="savt-subtitle">{__app_name__} · v{__version__}</p>
+                <p class="savt-desc">
+                    Sistema de auditoría de tesis y trabajos finales. Diseñada para analizar
+                    la estructura, coherencia y consistencia de todos los apartados del documento,
+                    generando un informe de observaciones y recomendaciones para su mejora académica.
+                </p>
+                <p class="savt-institution">Universidad Católica de Cuyo · Observatorio de Inteligencia Artificial</p>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
 
 
 def render_sidebar(report=None, min_pages: int = 1, max_pages: int = 300) -> tuple[bool, int, int, int]:
+    st.sidebar.image(LOGO_PATH, width=120)
     st.sidebar.header("Configuración")
     verify_online = st.sidebar.checkbox("Verificar DOI online (Crossref)", value=True)
     max_doi = st.sidebar.slider("Máximo de DOI a verificar", 5, 200, 25)
@@ -472,7 +488,10 @@ def main() -> None:
     )
 
     if not uploaded:
-        st.info("Suba un archivo .docx o .pdf para iniciar la auditoría académica.")
+        st.info(
+            "Suba un archivo .docx o .pdf para iniciar la auditoría académica. "
+            "El informe incluirá observaciones sobre estructura, bibliografía, coherencia y calidad formal."
+        )
         return
 
     if st.button("Ejecutar auditoría", type="primary", use_container_width=True):
