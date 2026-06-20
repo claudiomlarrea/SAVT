@@ -284,7 +284,15 @@ def build_report_docx(report: AuditReport, dashboard: dict) -> bytes:
     _add_heading(doc, "8. Profundidad y originalidad", 1)
     content = dashboard.get("content_dashboard") or {}
     orig = dashboard.get("originality_dashboard") or {}
-    _add_label_paragraph(doc, "Palabras marco teórico", str(content.get("marco_word_count", 0)))
+    _add_label_paragraph(doc, "Palabras totales (cuerpo)", str(content.get("total_body_words", 0)))
+    _add_label_paragraph(doc, "Palabras bibliografía", str(content.get("bibliography_words", 0)))
+    for item in content.get("sections") or []:
+        _add_bullet(
+            doc,
+            f"{item.get('title', '—')}: {item.get('words', 0)} palabras "
+            f"({item.get('percent_label', '—')} del cuerpo)",
+        )
+    _add_label_paragraph(doc, "Palabras marco teórico (rol canónico)", str(content.get("marco_word_count", 0)))
     _add_label_paragraph(doc, "Densidad de citas marco", str(content.get("citation_density_marco", 0)))
     _add_label_paragraph(doc, "Índice proxy originalidad", f"{orig.get('score_proxy', 0)}/100")
 

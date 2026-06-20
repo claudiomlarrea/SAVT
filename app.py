@@ -577,6 +577,33 @@ def render_content_depth(dashboard: dict) -> None:
         return
     st.markdown("## Profundidad académica")
     help_text = content.get("indicator_help") or {}
+
+    cols = st.columns(2)
+    with cols[0]:
+        st.metric("Palabras totales (cuerpo)", f"{content.get('total_body_words', 0):,}")
+        st.caption(help_text.get("total_body_words", ""))
+    with cols[1]:
+        bib_words = content.get("bibliography_words", 0)
+        st.metric("Palabras bibliografía", f"{bib_words:,}" if bib_words else "—")
+        st.caption(help_text.get("bibliography_words", ""))
+
+    sections = content.get("sections") or []
+    if sections:
+        st.markdown("**Palabras por capítulo o apartado**")
+        st.caption(help_text.get("sections", ""))
+        rows = []
+        for item in sections:
+            rows.append(
+                {
+                    "Apartado": item.get("title", "—"),
+                    "Palabras": item.get("words", 0),
+                    "% del total": item.get("percent_label", "—"),
+                    "Tipo": item.get("role_label") or "—",
+                }
+            )
+        st.dataframe(rows, use_container_width=True, hide_index=True)
+
+    st.markdown("**Indicadores del marco teórico**")
     cols = st.columns(3)
     with cols[0]:
         st.metric("Palabras marco teórico", content.get("marco_word_count", 0))

@@ -5,6 +5,7 @@ import re
 from savt.audit_config import AuditConfig
 from savt.document_sections import extract_section, get_section_map
 from savt.models import Finding
+from savt.word_stats import build_word_statistics, count_words
 
 CRITICAL_MARKERS = [
     "sin embargo",
@@ -64,16 +65,26 @@ def audit_content_quality(parsed: dict, config: AuditConfig) -> tuple[list[Findi
     findings: list[Finding] = []
     body = parsed.get("body", "")
     marco = _marco_text(parsed)
+    word_stats = build_word_statistics(parsed)
     dashboard: dict = {
-        "marco_word_count": len(re.findall(r"\b\w+\b", marco)) if marco else 0,
+        **word_stats,
+        "marco_word_count": count_words(marco) if marco else 0,
         "citation_density_marco": 0.0,
         "critical_markers_found": 0,
         "hypothesis_detected": False,
         "results_development": "unknown",
         "indicator_help": {
+            "total_body_words": (
+                "Palabras del cuerpo del trabajo (sin bibliografía ni anexos finales parseados)."
+            ),
+            "bibliography_words": "Palabras detectadas en la sección de bibliografía/referencias.",
+            "sections": (
+                "Extensión bajo cada encabezado detectado y su porcentaje sobre el total del cuerpo. "
+                "Subsecciones pueden solaparse con capítulos padre; la suma puede superar 100%."
+            ),
             "marco_word_count": (
-                "Cantidad de palabras detectadas en el marco teórico, revisión bibliográfica "
-                "o secciones equivalentes. Indica volumen de fundamentación, no calidad."
+                "Palabras en marco teórico / revisión bibliográfica (rol canónico). "
+                "Puede solaparse con filas del desglose por apartados."
             ),
             "citation_density_marco": (
                 "Promedio de citas bibliográficas cada 100 palabras del marco teórico. "
