@@ -79,6 +79,24 @@ def audit_originality(parsed: dict, config: AuditConfig) -> tuple[list[Finding],
         "publication_markers": publications,
         "level": level,
         "score_proxy": 0,
+        "indicator_help": {
+            "score_proxy": (
+                "Puntaje heurístico 0–100 a partir de aporte en conclusiones, datos propios, "
+                "publicaciones y completitud general. No mide plagio ni originalidad real."
+            ),
+            "contribution_markers": (
+                "Frases que explicitan aporte, implicaciones, novedad o recomendaciones "
+                "en conclusiones y cuerpo del trabajo."
+            ),
+            "own_data_markers": (
+                "Expresiones que señalan hallazgos, datos o instrumentos del estudio "
+                "(p. ej. «los resultados obtenidos», «elaboración propia»)."
+            ),
+            "level": (
+                "Exigencia del perfil de titulación: basic (grado/especialización), "
+                "standard (maestría) o strict (doctorado). Modifica qué tan estricto es SAVT."
+            ),
+        },
     }
 
     if not config.check_originality:

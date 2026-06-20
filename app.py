@@ -604,15 +604,20 @@ def render_originality(dashboard: dict) -> None:
     st.caption(
         "Indicadores heurísticos — no sustituyen evaluación de originalidad por el jurado."
     )
+    help_text = orig.get("indicator_help") or {}
     cols = st.columns(4)
     with cols[0]:
         st.metric("Índice proxy", f"{orig.get('score_proxy', 0)}/100")
+        st.caption(help_text.get("score_proxy", ""))
     with cols[1]:
         st.metric("Marcadores de aporte", orig.get("contribution_markers", 0))
+        st.caption(help_text.get("contribution_markers", ""))
     with cols[2]:
         st.metric("Datos propios", orig.get("own_data_markers", 0))
+        st.caption(help_text.get("own_data_markers", ""))
     with cols[3]:
         st.metric("Nivel exigido", orig.get("level", "—"))
+        st.caption(help_text.get("level", ""))
 
 
 def render_findings_table(report) -> None:
