@@ -10,6 +10,7 @@ from savt.bibliography_styles import (
     topical_match,
 )
 from savt.models import Finding, ReferenceEntry
+from savt.page_locator import format_pages, pages_for_apa_key, pages_for_ref_number
 from savt.references import validate_doi
 
 DOI_HELP = {
@@ -46,6 +47,7 @@ def _plausible_year(year: str) -> bool:
 
 def analyze_unmatched_apa(parsed: dict, bibliography: dict[int, ReferenceEntry]) -> list[dict]:
     bib_keys = {ref.key for ref in bibliography.values() if ref.key}
+    body = parsed.get("body", "")
     raw_map: dict[str, list[str]] = {}
     for key, paragraph in parsed.get("citation_contexts_apa", []):
         for match in re.finditer(r"\(([^()]*?\d{4}[a-z]?[^()]*?)\)", paragraph):
@@ -69,10 +71,13 @@ def analyze_unmatched_apa(parsed: dict, bibliography: dict[int, ReferenceEntry])
         if citation_present_in_bibliography_text(key, parsed.get("bibliography_text", "")):
             continue
         author, year = key.split("|", 1) if "|" in key else (key, "")
+        cite_pages = pages_for_apa_key(body, parsed, key)
         items.append(
             {
                 "key": key,
                 "citations_in_text": raw_map.get(key, [f"({author}, {year})"]),
+                "pages": cite_pages,
+                "pages_label": format_pages(cite_pages),
                 "hint": (
                     "Busque en bibliografía una entrada con ese apellido y año, o corrija la cita en el texto. "
                     "Revise variantes: 'et al.', apellidos compuestos, instituciones (CEPAL/ECLAC)."
@@ -112,12 +117,16 @@ def analyze_off_topic(
         return []
 
     items: list[dict] = []
+    body = parsed.get("body", "")
     for num, ref in sorted(bibliography.items()):
         if not topical_match(ref, keywords):
+            cite_pages = pages_for_ref_number(body, parsed, num)
             items.append(
                 {
                     "number": num,
                     "summary": _ref_summary(num, ref),
+                    "pages": cite_pages,
+                    "pages_label": format_pages(cite_pages) if cite_pages else "no citada en el cuerpo",
                     "reason": (
                         "No se encontró coincidencia clara con palabras clave del tema "
                         f"({', '.join(keywords[:6])})."
@@ -277,7 +286,10 @@ def build_bibliography_details(
             lines = []
             for item in unmatched_apa[:15]:
                 cites = ", ".join(item["citations_in_text"][:3])
-                lines.append(f"Cita en texto: {cites} → clave detectada: {item['key']}")
+                lines.append(
+                    f"{item.get('pages_label', 'pág. no estimada')}: {cites} "
+                    f"(clave: {item['key']})"
+                )
             findings.append(
                 Finding(
                     module="Bibliografía",
@@ -331,6 +343,11 @@ def build_bibliography_details(
     invalid, not_resolved, network, year_mismatch, doi_findings = analyze_doi_issues(
         bibliography, verify_online, max_checks
     )
+    body = parsed.get("body", "")
+    for item in year_mismatch:
+        cite_pages = pages_for_ref_number(body, parsed, item["number"])
+        item["pages"] = cite_pages
+        item["pages_label"] = format_pages(cite_pages) if cite_pages else "solo en bibliografía"
     findings.extend(doi_findings)
 
     bib_keys = {ref.key for ref in bibliography.values() if ref.key}

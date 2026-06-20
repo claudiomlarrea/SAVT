@@ -82,36 +82,10 @@ def audit_formal_requirements(parsed: dict, profile: InstitutionalProfile) -> tu
                     "Presentación de la tesis, Abstract o Síntesis con desarrollo suficiente. "
                     "Verifique la normativa de su casa de estudios."
                 ),
-                why="La mayoría de universidades exigen un resumen estructurado.",
+                why="Muchas universidades exigen una síntesis inicial del trabajo.",
                 how_to_fix=(
-                    "Agregue resumen con problema, objetivos, metodología y resultados principales."
+                    "Agregue resumen o presentación con problema, objetivos, metodología y resultados principales."
                 ),
-            )
-        )
-    elif abstract_words > profile.abstract_max_words:
-        findings.append(
-            Finding(
-                module="Normativa",
-                severity="warning",
-                title="Resumen excede extensión recomendada",
-                detail=(
-                    f"Sección '{abstract_kind}' detectada: ~{abstract_words} palabras "
-                    f"(máx. sugerido {profile.abstract_max_words} para {profile.label})."
-                ),
-                how_to_fix="Condense el resumen manteniendo problema, método y hallazgos clave.",
-            )
-        )
-    elif abstract_words < profile.abstract_min_words:
-        findings.append(
-            Finding(
-                module="Normativa",
-                severity="info",
-                title="Resumen breve",
-                detail=(
-                    f"Sección '{abstract_kind}' detectada: ~{abstract_words} palabras "
-                    f"(mín. sugerido {profile.abstract_min_words})."
-                ),
-                how_to_fix="Amplíe el resumen con objetivos, metodología y resultados principales.",
             )
         )
     else:
@@ -119,8 +93,12 @@ def audit_formal_requirements(parsed: dict, profile: InstitutionalProfile) -> tu
             Finding(
                 module="Normativa",
                 severity="ok",
-                title="Resumen dentro de extensión esperada",
-                detail=f"Sección '{abstract_kind}' detectada: ~{abstract_words} palabras.",
+                title="Resumen o presentación detectada",
+                detail=(
+                    f"Sección '{abstract_kind or 'inicial'}' detectada: ~{abstract_words} palabras. "
+                    "No existe un límite de extensión universal para especialización, maestría, "
+                    "doctorado o trabajo final; ajuste la longitud a la normativa de su facultad."
+                ),
             )
         )
 

@@ -142,11 +142,16 @@ def _warning_detail_items(finding: Finding, bib_details: dict) -> list[dict]:
         for entry in bib_details.get("unmatched_apa") or []:
             items.append(
                 {
-                    "label": "Cita en el texto",
-                    "value": ", ".join(entry["citations_in_text"]),
-                    "extra": f"Clave detectada: {entry['key']}",
+                    "label": entry.get("pages_label", "pág. no estimada"),
+                    "value": ", ".join(entry.get("citations_in_text") or []),
+                    "extra": f"Clave detectada: {entry.get('key', '')}",
                 }
             )
+    elif "Párrafos duplicados" in title:
+        for line in (finding.evidence or "").splitlines():
+            line = line.strip()
+            if line:
+                items.append({"label": "Repetición", "value": line})
     elif "Referencias anteriores al rango" in title:
         for entry in bib_details.get("out_of_period") or []:
             items.append(
@@ -158,7 +163,13 @@ def _warning_detail_items(finding: Finding, bib_details: dict) -> list[dict]:
             )
     elif "ajenas al tema" in title:
         for entry in bib_details.get("off_topic") or []:
-            items.append({"label": f"Ref. {entry['number']}", "value": entry["summary"]})
+            items.append(
+                {
+                    "label": f"Ref. {entry['number']} · {entry.get('pages_label', 'pág. no estimada')}",
+                    "value": entry["summary"],
+                    "extra": entry.get("reason", ""),
+                }
+            )
     elif title == "DOI inválidos o no resueltos":
         for entry in bib_details.get("doi_invalid") or []:
             items.append(
@@ -180,7 +191,7 @@ def _warning_detail_items(finding: Finding, bib_details: dict) -> list[dict]:
         for entry in bib_details.get("doi_year_mismatch") or []:
             items.append(
                 {
-                    "label": f"Ref. {entry['number']}",
+                    "label": f"Ref. {entry['number']} · {entry.get('pages_label', 'pág. no estimada')}",
                     "value": (
                         f"Año en bibliografía: {entry['year_in_bibliography']} · "
                         f"Año Crossref: {entry['year_in_crossref']}"

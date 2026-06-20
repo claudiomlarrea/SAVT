@@ -230,6 +230,10 @@ def render_warnings(dashboard: dict) -> None:
         return
 
     st.markdown(f"## Advertencias detectadas ({len(warnings)})")
+    st.caption(
+        "Las páginas indicadas son estimadas a partir del cuerpo del documento "
+        "(precisas en PDF; aproximadas en Word según extensión total)."
+    )
     for idx, item in enumerate(warnings, start=1):
         st.markdown(f"**{idx}. {item['title']}**")
         st.caption(item["gravity"])
@@ -242,7 +246,16 @@ def render_warnings(dashboard: dict) -> None:
 
             detail_items = item.get("detail_items") or []
             if detail_items:
-                st.markdown("**Referencias / citas a revisar:**")
+                heading = "**Párrafos / citas / referencias a revisar:**"
+                if "duplicados" in item.get("finding_title_raw", "").lower():
+                    heading = "**Párrafos duplicados (página estimada):**"
+                elif "Citas APA" in item.get("finding_title_raw", ""):
+                    heading = "**Citas en el texto (página estimada):**"
+                elif "ajenas al tema" in item.get("finding_title_raw", ""):
+                    heading = "**Referencias y páginas donde se citan:**"
+                elif "Año bibliográfico" in item.get("finding_title_raw", ""):
+                    heading = "**Referencias con año discordante (páginas de cita):**"
+                st.markdown(heading)
                 for row in detail_items[:20]:
                     st.markdown(f"- **{row['label']}:** {row['value']}")
                     if row.get("extra"):
@@ -563,13 +576,17 @@ def render_content_depth(dashboard: dict) -> None:
     if not content:
         return
     st.markdown("## Profundidad académica")
+    help_text = content.get("indicator_help") or {}
     cols = st.columns(3)
     with cols[0]:
         st.metric("Palabras marco teórico", content.get("marco_word_count", 0))
+        st.caption(help_text.get("marco_word_count", ""))
     with cols[1]:
         st.metric("Densidad de citas /100 pal.", content.get("citation_density_marco", 0))
+        st.caption(help_text.get("citation_density_marco", ""))
     with cols[2]:
         st.metric("Marcadores críticos", content.get("critical_markers_found", 0))
+        st.caption(help_text.get("critical_markers_found", ""))
 
     if content.get("hypothesis_detected"):
         st.markdown("✔ Hipótesis detectada")

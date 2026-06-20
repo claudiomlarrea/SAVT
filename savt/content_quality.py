@@ -70,6 +70,20 @@ def audit_content_quality(parsed: dict, config: AuditConfig) -> tuple[list[Findi
         "critical_markers_found": 0,
         "hypothesis_detected": False,
         "results_development": "unknown",
+        "indicator_help": {
+            "marco_word_count": (
+                "Cantidad de palabras detectadas en el marco teórico, revisión bibliográfica "
+                "o secciones equivalentes. Indica volumen de fundamentación, no calidad."
+            ),
+            "citation_density_marco": (
+                "Promedio de citas bibliográficas cada 100 palabras del marco teórico. "
+                "Valores más altos suelen reflejar mayor apoyo documental."
+            ),
+            "critical_markers_found": (
+                "Expresiones de análisis crítico (contrastes, autores citados, limitaciones, debates). "
+                "Cuenta indicios de lectura activa, no profundidad por sí sola."
+            ),
+        },
     }
 
     if not config.check_content_depth:
