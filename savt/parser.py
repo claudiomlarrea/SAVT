@@ -71,8 +71,8 @@ def split_body_and_bibliography(full_text: str) -> tuple[str, str]:
     idx = match[-1].start()
     body = full_text[:idx].strip()
     bib = full_text[idx:].strip()
-    bib = re.sub(r"^(?i)BIBLIOGRAF[IÍ]A\s*", "BIBLIOGRAFÍA\n", bib)
-    bib = re.sub(r"^(?i)REFERENCIAS\s*", "REFERENCIAS\n", bib)
+    bib = re.sub(r"^BIBLIOGRAF[IÍ]A\s*", "BIBLIOGRAFÍA\n", bib, flags=re.IGNORECASE)
+    bib = re.sub(r"^REFERENCIAS\s*", "REFERENCIAS\n", bib, flags=re.IGNORECASE)
     return body, bib
 
 
