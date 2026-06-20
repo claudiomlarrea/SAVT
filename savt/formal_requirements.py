@@ -76,10 +76,11 @@ def audit_formal_requirements(parsed: dict, profile: InstitutionalProfile) -> tu
             Finding(
                 module="Normativa",
                 severity="info",
-                title="Resumen o abstract no detectado con encabezado estándar",
+                title="Resumen, presentación o abstract no detectado",
                 detail=(
-                    "No se encontró RESUMEN, ABSTRACT ni sección equivalente "
-                    "(p. ej. Presentación del Trabajo). Verifique la normativa de su casa de estudios."
+                    "No se identificó una sección inicial tipo Resumen, Presentación, "
+                    "Presentación de la tesis, Abstract o Síntesis con desarrollo suficiente. "
+                    "Verifique la normativa de su casa de estudios."
                 ),
                 why="La mayoría de universidades exigen un resumen estructurado.",
                 how_to_fix=(

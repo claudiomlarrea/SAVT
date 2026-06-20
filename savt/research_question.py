@@ -20,7 +20,10 @@ def audit_research_question(parsed: dict) -> tuple[list[Finding], dict]:
                 title="Pregunta de investigación no detectada",
                 detail="No se encontró un interrogante explícito en la introducción.",
                 why="La pregunta define el foco evaluable del trabajo.",
-                how_to_fix="Formule la pregunta en una sección dedicada (p. ej. 1.4 Pregunta de investigación).",
+                how_to_fix=(
+                    "Formule la pregunta en una sección dedicada (p. ej. «Pregunta de investigación»), "
+                    "o declare el «Tema de la tesis» / problema de investigación con un interrogante explícito."
+                ),
             )
         )
         return findings, {"question": "", "checks": []}

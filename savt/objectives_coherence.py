@@ -35,9 +35,18 @@ def _keywords(text: str) -> list[str]:
 
 
 def _find_results_text(body: str, sections: dict[str, str]) -> str:
+    section_map = sections if isinstance(sections, dict) else {}
+    for key in ("resultados",):
+        if section_map.get(key):
+            return section_map[key]
     for key, text in sections.items():
-        if any(word in key.lower() for word in ["resultado", "sec_4"]):
+        if any(word in key.lower() for word in ["resultado", "sec_4", "tercera"]):
             return text
+    from savt.section_resolver import get_canonical_section
+
+    canonical = get_canonical_section(body, "resultados")
+    if canonical:
+        return canonical
     match = re.search(r"(?is)resultados.+?(?:discusi|conclusi|\Z)", body)
     return match.group(0) if match else ""
 
@@ -46,7 +55,7 @@ def audit_objectives_coherence(parsed: dict) -> tuple[list[Finding], list[dict]]
     findings: list[Finding] = []
     objectives = parsed.get("objectives") or []
     body = parsed["body"]
-    sections = parsed["sections"]
+    sections = parsed.get("section_map") or parsed.get("sections", {})
     results_text = _find_results_text(body, sections).lower()
     conclusions = (parsed.get("conclusions") or "").lower()
     evaluations: list[dict] = []

@@ -9,7 +9,12 @@ SOURCE_HINTS = ["fuente:", "elaboración propia", "elaboracion propia", "adaptad
 
 def analyze_tables(body: str) -> tuple[list[dict], list[Finding]]:
     findings: list[Finding] = []
-    captions = re.findall(r"(?im)^\s*(?:Tabla|Table)\s+(\d+)\.\s*(.+)$", body)
+    captions = re.findall(
+        r"(?im)^\s*(?:Tabla|Table)\s+(\d+)(?:\s*N[º°o]\.?|:|\.)\s*(.+)$",
+        body,
+    )
+    if not captions:
+        captions = re.findall(r"(?im)^\s*(?:Tabla|Table)\s+(\d+)\.\s*(.+)$", body)
     caption_map = {int(num): title.strip() for num, title in captions}
     caption_nums = sorted(caption_map.keys())
     details: list[dict] = []

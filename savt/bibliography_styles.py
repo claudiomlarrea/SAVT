@@ -332,7 +332,7 @@ def is_institutional_citation_key(key: str) -> bool:
 def topical_match(reference: ReferenceEntry, keywords: list[str]) -> bool:
     if not keywords:
         return True
-    ref_norm = strip_accents(reference.raw.lower())
+    ref_norm = strip_accents((reference.raw + " " + (reference.title or "")).lower())
     hits = 0
     for keyword in keywords:
         kw = strip_accents(keyword.lower())
@@ -341,8 +341,9 @@ def topical_match(reference: ReferenceEntry, keywords: list[str]) -> bool:
         if kw in ref_norm:
             hits += 1
             continue
-        if len(kw) >= 6 and any(kw[:5] in token for token in re.findall(r"[a-z]{4,}", ref_norm)):
+        if len(kw) >= 5 and any(kw[:4] in token for token in re.findall(r"[a-z]{4,}", ref_norm)):
             hits += 1
+    # Referencias interdisciplinarias: basta con coincidir un término clave.
     return hits >= 1
 
 

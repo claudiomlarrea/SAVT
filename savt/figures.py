@@ -7,11 +7,17 @@ from savt.models import Finding
 SOURCE_HINTS = ["fuente:", "elaboración propia", "elaboracion propia", "adaptado de", "tomado de"]
 
 CAPTION_PATTERNS = [
+    (r"(?im)^\s*Figura\s+(\d+)(?:\s*N[º°o]\.?|:|\.)\s*(.+)$", "Figura"),
     (r"(?im)^\s*Figura\s+(\d+)\.\s*(.+)$", "Figura"),
+    (r"(?im)^\s*Fig\.\s*(\d+)(?:\s*N[º°o]\.?|:|\.)\s*(.+)$", "Figura"),
     (r"(?im)^\s*Fig\.\s*(\d+)\.\s*(.+)$", "Figura"),
+    (r"(?im)^\s*Figure\s+(\d+)(?:\s*N[º°o]\.?|:|\.)\s*(.+)$", "Figure"),
     (r"(?im)^\s*Figure\s+(\d+)\.\s*(.+)$", "Figure"),
+    (r"(?im)^\s*Gr[aá]fico\s+(\d+)(?:\s*N[º°o]\.?|:|\.)\s*(.+)$", "Gráfico"),
     (r"(?im)^\s*Gr[aá]fico\s+(\d+)\.\s*(.+)$", "Gráfico"),
+    (r"(?im)^\s*Cuadro\s+(\d+)(?:\s*N[º°o]\.?|:|\.)\s*(.+)$", "Cuadro"),
     (r"(?im)^\s*Cuadro\s+(\d+)\.\s*(.+)$", "Cuadro"),
+    (r"(?im)^\s*Imagen\s+(\d+)(?:\s*N[º°o]\.?|:|\.)\s*(.+)$", "Imagen"),
     (r"(?im)^\s*Imagen\s+(\d+)\.\s*(.+)$", "Imagen"),
 ]
 
@@ -67,6 +73,7 @@ def analyze_figures(body: str) -> tuple[list[dict], list[Finding]]:
             rf"\bFigura\s+{num}\b",
             rf"\bFig\.\s*{num}\b",
             rf"\bGr[aá]fico\s+{num}\b",
+            rf"\b{kind}\s+{num}\s*N",
         ]
         mentioned = any(
             re.search(p, line, re.IGNORECASE)

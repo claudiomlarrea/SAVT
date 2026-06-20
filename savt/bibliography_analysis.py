@@ -313,7 +313,8 @@ def build_bibliography_details(
         )
 
     off_topic = analyze_off_topic(bibliography, parsed)
-    if off_topic and len(off_topic) > len(bibliography) * 0.15:
+    off_topic_ratio = len(off_topic) / max(len(bibliography), 1)
+    if off_topic and off_topic_ratio > 0.30 and len(parsed.get("topic_keywords") or []) >= 4:
         findings.append(
             Finding(
                 module="Bibliografía",

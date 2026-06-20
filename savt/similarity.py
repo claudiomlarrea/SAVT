@@ -5,6 +5,24 @@ from collections import Counter
 
 from savt.models import Finding
 
+_ANNEX_MARKERS = re.compile(
+    r"\b(anexo|apéndice|apendice|variables?\s+e\s+indicadores|plantilla)\b",
+    re.I,
+)
+_TABLE_ROW_PATTERN = re.compile(r"^\s*\|?.+\|.+\|?\s*$|^\s*\d+[\.\)]\s+\w")
+
+
+def _is_boilerplate_paragraph(paragraph: str) -> bool:
+    lower = paragraph.lower()
+    if _ANNEX_MARKERS.search(lower):
+        return True
+    if _TABLE_ROW_PATTERN.match(paragraph.strip()):
+        return True
+    # Plantillas de encuesta con opciones repetidas.
+    if lower.count("totalmente de acuerdo") >= 2 or lower.count("nada de acuerdo") >= 2:
+        return True
+    return False
+
 
 def audit_similarity(parsed: dict) -> list[Finding]:
     findings: list[Finding] = []
@@ -13,6 +31,8 @@ def audit_similarity(parsed: dict) -> list[Finding]:
     duplicated: list[str] = []
     seen: dict[str, str] = {}
     for paragraph in paragraphs:
+        if _is_boilerplate_paragraph(paragraph):
+            continue
         normalized = re.sub(r"\s+", " ", paragraph.lower())
         normalized = re.sub(r"\(\d+(?:[,\s\-–]\d+)*\)", "", normalized)
         if len(normalized) < 120:
@@ -37,6 +57,8 @@ def audit_similarity(parsed: dict) -> list[Finding]:
 
     sentence_starts = Counter()
     for paragraph in paragraphs:
+        if _is_boilerplate_paragraph(paragraph):
+            continue
         for sentence in re.split(r"(?<=[.!?])\s+", paragraph):
             words = sentence.split()[:4]
             if len(words) >= 3:

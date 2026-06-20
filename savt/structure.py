@@ -6,6 +6,7 @@ from savt.models import Finding
 
 
 from savt.document_sections import extract_section, get_section_map
+from savt.section_resolver import get_canonical_section
 
 
 def _find_block(body: str, sections: dict[str, str], keywords: list[str]) -> str:
@@ -25,6 +26,8 @@ def _find_block(body: str, sections: dict[str, str], keywords: list[str]) -> str
         "material y metodo": "metodologia",
         "resultado": "resultados",
         "discusi": "discusion",
+        "interpretación": "discusion",
+        "interpretacion": "discusion",
         "conclus": "conclusiones",
     }
     for keyword in keywords:
@@ -196,8 +199,22 @@ def audit_structure(parsed: dict) -> tuple[list[Finding], dict]:
         ["marco teórico", "marco teorico", "marco conceptual", "fundament", "estado del arte", "referencial teórico"],
     )
     results = _find_block(body, combined_sections, ["resultado"])
-    discussion = _find_block(body, combined_sections, ["discusi"])
+    discussion = _find_block(
+        body,
+        combined_sections,
+        ["discusi", "interpretación", "interpretacion", "análisis de resultados", "analisis de resultados"],
+    )
+    if not discussion:
+        discussion = get_canonical_section(body, "discusion", section_map)
+    if not results:
+        results = get_canonical_section(body, "resultados", section_map)
+    if not method:
+        method = get_canonical_section(body, "metodologia", section_map)
+    if not marco:
+        marco = get_canonical_section(body, "marco_teorico", section_map)
     conclusions_block = conclusions or _find_block(body, combined_sections, ["conclus"])
+    if not conclusions_block:
+        conclusions_block = get_canonical_section(body, "conclusiones", section_map)
 
     intro_scope = body[:20000] if parsed.get("research_questions") else (intro or body[:20000])
     method_scope = method or body

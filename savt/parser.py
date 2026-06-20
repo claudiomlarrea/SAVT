@@ -208,12 +208,20 @@ def extract_research_questions(body: str) -> list[str]:
         body,
         re.IGNORECASE | re.DOTALL,
     )
+    tema_match = re.search(
+        r"(?is)Tema\s+de\s+(?:la\s+)?[Tt]esis\s*:?\s*(.+?)(?:\n\n|\n\d+\.)",
+        body,
+    )
     scope = intro_match.group(1) if intro_match else body
     if block_match:
         scope = block_match.group(1)
     questions = [_normalize(q) for q in RESEARCH_QUESTION.findall(scope)]
     if not questions:
         questions = [_normalize(q) for q in RESEARCH_QUESTION.findall(body)]
+    if not questions and tema_match:
+        tema = _normalize(tema_match.group(1))
+        if len(tema) > 25:
+            questions = [tema if tema.endswith("?") else f"¿{tema}?"]
     return questions
 
 
@@ -239,6 +247,9 @@ def _objectives_from_block(block: str) -> list[str]:
 
 def extract_objectives(body: str) -> list[str]:
     patterns = [
+        r"(?is)(?:\d+(?:\.\d+)*\.?\s*)?Objetivos\s+espec[ií]ficos\s*(.+?)"
+        r"(?=\n\s*(?:Supuestos|Hipótesis|CAPÍTULO|CAPITULO|SEGUNDA|TERCERA|CUARTA|QUINTA|"
+        r"METODOLOG|MATERIALES|PARTE\s+[-–]|\Z))",
         r"1\.5\.2 Objetivos específicos(.+?)(?:CAPÍTULO II|CAPITULO II)",
         r"Objetivos específicos\s*\n(.+?)(?:\n5\.\s+Hipótesis|\nHipótesis de investigación|\nHipótesis|\n\d+\.\s+Metodolog|\nCapítulo|\nMETODOLOG)",
     ]
@@ -247,6 +258,14 @@ def extract_objectives(body: str) -> list[str]:
         if not block_match:
             continue
         objectives = _objectives_from_block(block_match.group(1))
+        if objectives:
+            return objectives
+
+    from savt.section_resolver import get_canonical_section
+
+    obj_section = get_canonical_section(body, "objetivos")
+    if obj_section:
+        objectives = _objectives_from_block(obj_section)
         if objectives:
             return objectives
     return []
@@ -270,12 +289,19 @@ def extract_conclusions(body: str) -> str:
             return text
 
     for pattern in [
+        r"(?is)(?:CUARTA\s+PARTE[^\n]*\n)?\s*CONCLUSIONES(?:\s+GENERALES)?\s*\n(.+?)(?:\nBIBLIOGRAFÍA|\nREFERENCIAS|\Z)",
         r"(?m)^CONCLUSIONES(?:\s+GENERALES)?\s*\n(.+?)(?:\nBIBLIOGRAFÍA|\Z)",
         r"Conclusiones generales\s*\n(.+?)(?:\nBIBLIOGRAFÍA|\Z)",
     ]:
         match = re.search(pattern, body, re.IGNORECASE | re.DOTALL)
         if match and len(match.group(1).strip()) > 400:
             return match.group(1).strip()
+
+    from savt.section_resolver import get_canonical_section
+
+    canonical = get_canonical_section(body, "conclusiones")
+    if len(canonical) > 400:
+        return canonical
 
     match = re.search(
         r"CONCLUSIONES(.+?)(?:BIBLIOGRAFÍA|$)",

@@ -12,23 +12,31 @@ SECTION_END_MARKERS = (
     r"CONCLUSIONES|BIBLIOGRAF[IÍ]A|REFERENCIAS|ANEXOS"
 )
 
+_ABSTRACT_END = (
+    r"(?=\n\s*(?:PALABRAS?\s+CLAVE|KEYWORDS|ABSTRACT|ÍNDICE|INDICE|"
+    r"INTRODUCCI[ÓO]N|PREGUNTA|CAPÍTULO|CAPITULO|PRIMERA\s+PARTE|"
+    r"\d+(?:\.\d+)*\.?\s+[A-ZÁÉÍÓÚÑ]))"
+)
+
 ABSTRACT_PATTERNS = [
     (
         "resumen",
-        r"(?is)(?:^|\n)\s*RESUMEN\s*\n(.+?)(?=\n\s*(?:PALABRAS?\s+CLAVE|KEYWORDS|ABSTRACT|ÍNDICE|INDICE|INTRODUCCI[ÓO]N|CAPÍTULO|CAPITULO|\d+\.\s+[A-Z]))",
+        rf"(?is)(?:^|\n)\s*RESUMEN\s*\n(.+?){_ABSTRACT_END}",
     ),
     (
         "abstract",
-        r"(?is)(?:^|\n)\s*ABSTRACT\s*\n(.+?)(?=\n\s*(?:KEYWORDS|PALABRAS?\s+CLAVE|ÍNDICE|INDICE|INTRODUCCI[ÓO]N|CAPÍTULO|CAPITULO|\d+\.\s+[A-Z]))",
+        rf"(?is)(?:^|\n)\s*ABSTRACT\s*\n(.+?){_ABSTRACT_END}",
     ),
     (
         "presentacion",
-        r"(?is)(?:^|\n)\s*Presentaci[oó]n del Trabajo(?: de Tesis| Final)?\s*(?:\n|\s+)(.+?)"
-        r"(?=\n\s*(?:INTRODUCCI[ÓO]N|PREGUNTA DE INVESTIGACI[ÓO]N|CAPÍTULO|CAPITULO|\d+\.\s+[A-Z]))",
+        r"(?is)(?:^|\n)\s*Presentaci[oó]n(?:\s+del\s+Trabajo(?:\s+(?:de\s+)?Tesis| Final)?|"
+        r"\s+de\s+la\s+[Tt]esis)?\s*(?:\n|\s+)(.+?)"
+        rf"(?=\n\s*(?:INTRODUCCI[ÓO]N|PREGUNTA|CAPÍTULO|CAPITULO|PRIMERA\s+PARTE|"
+        r"\d+(?:\.\d+)*\.?\s+[A-ZÁÉÍÓÚÑ]))",
     ),
     (
         "sintesis",
-        r"(?is)(?:^|\n)\s*S[ií]ntesis\s*\n(.+?)(?=\n\s*(?:PALABRAS?\s+CLAVE|ÍNDICE|INDICE|INTRODUCCI[ÓO]N|CAPÍTULO|CAPITULO))",
+        rf"(?is)(?:^|\n)\s*S[ií]ntesis\s*\n(.+?){_ABSTRACT_END}",
     ),
 ]
 
@@ -56,8 +64,17 @@ SECTION_ALIASES: dict[str, tuple[str, ...]] = {
         "diseno metodologico",
     ),
     "resultados": ("resultado", "hallazgo"),
-    "discusion": ("discusi", "análisis de resultados", "analisis de resultados", "interpretación de resultados"),
+    "discusion": (
+        "discusi",
+        "análisis de resultados",
+        "analisis de resultados",
+        "interpretación de resultados",
+        "interpretacion de resultados",
+        "análisis e interpretación",
+        "analisis e interpretacion",
+    ),
     "conclusiones": ("conclus",),
+    "presentacion": ("presentacion", "presentación", "resumen", "abstract", "síntesis", "sintesis"),
 }
 
 
@@ -89,11 +106,24 @@ def extract_title(full_text: str, filename: str = "") -> str:
 def infer_topic_keywords(full_text: str, body: str, filename: str = "") -> list[str]:
     title = extract_title(full_text, filename)
     sources = [title, filename]
+    abstract, _, _ = extract_abstract(full_text)
+    if abstract:
+        sources.append(abstract[:2000])
     if body:
-        head_body = body[:8000]
+        head_body = body[:12000]
         q_match = re.search(r"¿[^?]{20,200}\?", head_body)
         if q_match:
             sources.append(q_match.group(0))
+        obj_match = re.search(
+            r"(?is)(?:\d+(?:\.\d+)*\.?\s*)?objetivos?\s+espec[ií]ficos?\s*(.+?)"
+            r"(?=\n\s*(?:Supuestos|CAPÍTULO|SEGUNDA|TERCERA|METODOLOG|MATERIALES|PARTE\s+[-–]|\Z))",
+            head_body,
+        )
+        if obj_match:
+            sources.append(obj_match.group(1)[:1500])
+        tema_match = re.search(r"(?is)Tema\s+de\s+(?:la\s+)?[Tt]esis\s*:?\s*(.+?)(?:\n\n|\n[A-Z])", head_body)
+        if tema_match:
+            sources.append(tema_match.group(1)[:500])
 
     stop = {
         "trabajo",
@@ -196,7 +226,9 @@ def _heading_positions(body: str) -> list[tuple[int, str, str]]:
         (r"(?m)^(INTRODUCCI[ÓO]N|PREGUNTA DE INVESTIGACI[ÓO]N|AN[ÁA]LISIS BIBLIOM[EÉ]TRICO|"
          r"MARCO TE[OÓ]RICO|MARCO CONCEPTUAL|METODOLOG[IÍ]A|MATERIALES Y M[EÉ]TODOS|"
          r"RESULTADOS|DISCUSI[ÓO]N|CONCLUSIONES)\s*$", "mayus"),
-        (r"(?m)^(\d+\.\s+[A-ZÁÉÍÓÚÑ][^\n]{5,80})$", "numerada"),
+        (r"(?m)^(\d+(?:\.\d+)*\.?\s+[A-ZÁÉÍÓÚÑ][^\n]{4,120})$", "numerada"),
+        (r"(?m)^(PRIMERA|SEGUNDA|TERCERA|CUARTA|QUINTA)\s+PARTE(?:\s+[-–]?\s*.+)?$", "parte"),
+        (r"(?m)^(Presentaci[oó]n(?:\s+del\s+Trabajo(?:\s+(?:de\s+)?Tesis| Final)?)?)\s*$", "presentacion"),
     ]
     for pattern, kind in patterns:
         for match in re.finditer(pattern, body, re.IGNORECASE):
@@ -233,12 +265,14 @@ def extract_section(body: str, aliases: tuple[str, ...]) -> str:
 
 
 def get_section_map(body: str) -> dict[str, str]:
-    mapped: dict[str, str] = {}
+    from savt.section_resolver import build_canonical_map, merged_section_map
+
+    legacy: dict[str, str] = {}
     for key, aliases in SECTION_ALIASES.items():
         text = extract_section(body, aliases)
         if text:
-            mapped[key] = text
-    return mapped
+            legacy[key] = text
+    return merged_section_map(body, legacy)
 
 
 def suggest_degree_profile(full_text: str, page_estimate: float) -> str:
