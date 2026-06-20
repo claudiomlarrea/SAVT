@@ -3,58 +3,50 @@ from __future__ import annotations
 import re
 
 from savt.audit_config import AuditConfig
+from savt.document_sections import assess_cover, extract_abstract, extract_title
 from savt.institutional_profiles import InstitutionalProfile
 from savt.models import Finding
-
-
-def _word_count(text: str) -> int:
-    return len(re.findall(r"\b\w+\b", text, re.UNICODE))
-
-
-def _extract_abstract(full_text: str) -> tuple[str, int]:
-    patterns = [
-        r"(?is)(?:^|\n)\s*RESUMEN\s*\n(.+?)(?:\n\s*(?:PALABRAS?\s+CLAVE|ABSTRACT|ÍNDICE|INDICE|CAPÍTULO|CAPITULO|\d+\.\s))",
-        r"(?is)(?:^|\n)\s*ABSTRACT\s*\n(.+?)(?:\n\s*(?:KEYWORDS|PALABRAS?\s+CLAVE|ÍNDICE|INDICE|CAPÍTULO|CAPITULO|\d+\.\s))",
-    ]
-    for pattern in patterns:
-        match = re.search(pattern, full_text)
-        if match:
-            text = re.sub(r"\s+", " ", match.group(1)).strip()
-            if len(text) > 80:
-                return text, _word_count(text)
-    return "", 0
 
 
 def audit_formal_requirements(parsed: dict, profile: InstitutionalProfile) -> tuple[list[Finding], dict]:
     findings: list[Finding] = []
     full_text = parsed.get("full_text") or parsed.get("body", "")
-    lower = full_text.lower()
     checks: dict[str, bool | str | int] = {}
 
-    cover_markers = [
-        ("universidad", r"\buniversidad\b"),
-        ("titulo_tema", r"\btema\s*:|\btítulo\s*:|\btitulo\s*:"),
-        ("director", r"\bdirector(?:a)?\s*:"),
-        ("estudiante", r"\bestudiante\s*:|tesista|autor(?:a)?\s*:"),
-    ]
-    cover_found = sum(1 for _, pat in cover_markers if re.search(pat, lower[:4000]))
-    checks["portada_completa"] = cover_found >= 3
-    if cover_found < 2:
+    cover = assess_cover(full_text)
+    cover_score = sum(1 for ok in cover.values() if ok)
+    checks["portada_completa"] = cover_score >= 3
+    checks.update({f"portada_{k}": v for k, v in cover.items()})
+
+    if cover_score < 3:
+        missing = [k for k, ok in cover.items() if not ok]
         findings.append(
             Finding(
                 module="Normativa",
-                severity="warning",
+                severity="warning" if cover_score < 2 else "info",
                 title="Portada incompleta o no detectada",
                 detail=(
-                    "No se identificaron claramente universidad, director/a y estudiante en las "
-                    "primeras páginas. Verifique portada externa e interna según normativa institucional."
+                    f"Elementos no detectados en las primeras páginas: {', '.join(missing)}. "
+                    "Verifique portada según normativa de su universidad."
                 ),
-                why="La portada es requisito formal en rúbricas UNCUyo/UCCuyo y CONEAU.",
-                how_to_fix="Incluya portada con institución, carrera, título, director/a, tesista y fecha.",
+                why="La portada es requisito formal en evaluaciones de grado y posgrado.",
+                how_to_fix=(
+                    "Incluya institución, título, autor/a, director/a y carrera o programa."
+                ),
+            )
+        )
+    else:
+        findings.append(
+            Finding(
+                module="Normativa",
+                severity="ok",
+                title="Portada detectada con elementos principales",
+                detail="Se identificaron institución, título, director/a y autor/a.",
             )
         )
 
-    index_ok = bool(re.search(r"\b(índice|indice)\b", lower[:8000]))
+    lower = full_text.lower()
+    index_ok = bool(re.search(r"\b(índice|indice|table of contents)\b", lower[:12000]))
     checks["indice"] = index_ok
     if not index_ok:
         findings.append(
@@ -63,29 +55,36 @@ def audit_formal_requirements(parsed: dict, profile: InstitutionalProfile) -> tu
                 severity="info",
                 title="Índice general no detectado",
                 detail="No se encontró un índice general al inicio del documento.",
-                why="El índice facilita la evaluación y es exigencia en rúbricas de grado y posgrado.",
-                how_to_fix="Genere índice automático en Word e incluya capítulos y subsecciones numeradas.",
+                why="El índice facilita la evaluación del jurado.",
+                how_to_fix="Genere índice automático con capítulos y subsecciones numeradas.",
             )
         )
 
-    fig_index = bool(re.search(r"índice de figuras|indice de figuras", lower[:12000]))
-    tab_index = bool(re.search(r"índice de tablas|indice de tablas", lower[:12000]))
+    fig_index = bool(re.search(r"índice de figuras|indice de figuras|list of figures", lower[:15000]))
+    tab_index = bool(re.search(r"índice de tablas|indice de tablas|list of tables", lower[:15000]))
     checks["indice_figuras"] = fig_index
     checks["indice_tablas"] = tab_index
 
-    abstract_text, abstract_words = _extract_abstract(full_text)
+    abstract_text, abstract_words, abstract_kind = extract_abstract(full_text)
     checks["abstract_words"] = abstract_words
+    checks["abstract_kind"] = abstract_kind
     checks["abstract_text_preview"] = abstract_text[:200] if abstract_text else ""
+    checks["document_title"] = extract_title(full_text, parsed.get("filename", ""))
 
     if abstract_words == 0:
         findings.append(
             Finding(
                 module="Normativa",
-                severity="warning",
-                title="Resumen o abstract no detectado",
-                detail="No se encontró sección RESUMEN/ABSTRACT antes del cuerpo principal.",
-                why="El resumen es obligatorio en tesis de grado y posgrado (150–350 palabras).",
-                how_to_fix="Agregue RESUMEN con problema, objetivos, metodología y resultados principales.",
+                severity="info",
+                title="Resumen o abstract no detectado con encabezado estándar",
+                detail=(
+                    "No se encontró RESUMEN, ABSTRACT ni sección equivalente "
+                    "(p. ej. Presentación del Trabajo). Verifique la normativa de su casa de estudios."
+                ),
+                why="La mayoría de universidades exigen un resumen estructurado.",
+                how_to_fix=(
+                    "Agregue resumen con problema, objetivos, metodología y resultados principales."
+                ),
             )
         )
     elif abstract_words > profile.abstract_max_words:
@@ -95,8 +94,8 @@ def audit_formal_requirements(parsed: dict, profile: InstitutionalProfile) -> tu
                 severity="warning",
                 title="Resumen excede extensión recomendada",
                 detail=(
-                    f"Resumen detectado: ~{abstract_words} palabras "
-                    f"(máx. recomendado {profile.abstract_max_words} para {profile.label})."
+                    f"Sección '{abstract_kind}' detectada: ~{abstract_words} palabras "
+                    f"(máx. sugerido {profile.abstract_max_words} para {profile.label})."
                 ),
                 how_to_fix="Condense el resumen manteniendo problema, método y hallazgos clave.",
             )
@@ -108,7 +107,7 @@ def audit_formal_requirements(parsed: dict, profile: InstitutionalProfile) -> tu
                 severity="info",
                 title="Resumen breve",
                 detail=(
-                    f"Resumen detectado: ~{abstract_words} palabras "
+                    f"Sección '{abstract_kind}' detectada: ~{abstract_words} palabras "
                     f"(mín. sugerido {profile.abstract_min_words})."
                 ),
                 how_to_fix="Amplíe el resumen con objetivos, metodología y resultados principales.",
@@ -120,12 +119,12 @@ def audit_formal_requirements(parsed: dict, profile: InstitutionalProfile) -> tu
                 module="Normativa",
                 severity="ok",
                 title="Resumen dentro de extensión esperada",
-                detail=f"Resumen detectado: ~{abstract_words} palabras.",
+                detail=f"Sección '{abstract_kind}' detectada: ~{abstract_words} palabras.",
             )
         )
 
     keywords_ok = bool(
-        re.search(r"palabras?\s+clave|keywords", lower[:12000], re.IGNORECASE)
+        re.search(r"palabras?\s+clave|keywords", lower[:15000], re.IGNORECASE)
     )
     checks["palabras_clave"] = keywords_ok
     if abstract_words > 0 and not keywords_ok:
@@ -145,12 +144,12 @@ def audit_formal_requirements(parsed: dict, profile: InstitutionalProfile) -> tu
             Finding(
                 module="Normativa",
                 severity="info",
-                title="Estilo de citación distinto al perfil institucional",
+                title="Estilo de citación distinto al sugerido para el nivel",
                 detail=(
                     f"Perfil {profile.label} sugiere {profile.citation_style.upper()}; "
                     f"detectado: {style.upper()}."
                 ),
-                how_to_fix=f"Confirme con su director si debe usar {profile.citation_style.upper()}.",
+                how_to_fix=f"Confirme con su director el estilo de citación requerido.",
             )
         )
 
@@ -161,13 +160,13 @@ def audit_formal_requirements(parsed: dict, profile: InstitutionalProfile) -> tu
             Finding(
                 module="Normativa",
                 severity="warning",
-                title="Bibliografía por debajo del mínimo del perfil",
+                title="Bibliografía por debajo del mínimo sugerido",
                 detail=(
                     f"{ref_count} referencias detectadas; mínimo sugerido para "
                     f"{profile.label}: {profile.min_references}."
                 ),
-                why="La profundidad bibliográfica es criterio explícito en rúbricas CONEAU y UNCUyo.",
-                how_to_fix="Amplíe revisión de literatura con fuentes actuales y pertinentes al tema.",
+                why="La profundidad bibliográfica es criterio habitual en jurados de posgrado.",
+                how_to_fix="Amplíe revisión de literatura con fuentes actuales y pertinentes.",
             )
         )
 

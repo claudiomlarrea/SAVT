@@ -15,7 +15,10 @@ CHAPTER_PATTERN = re.compile(
     re.IGNORECASE,
 )
 SECTION_PATTERN = re.compile(r"^(\d+(?:\.\d+)+)\s+(.+)$")
-BIB_HEADING = re.compile(r"^BIBLIOGRAFÍA\s*$", re.IGNORECASE | re.MULTILINE)
+BIB_HEADING = re.compile(
+    r"(?m)(?:^|\n)\s*BIBLIOGRAF[IÍ]A(?:\s*$|\s+(?=[A-ZÁÉÍÓÚÑ]))",
+    re.IGNORECASE | re.MULTILINE,
+)
 RESEARCH_QUESTION = re.compile(
     r"¿[^?]+\?",
     re.MULTILINE,
@@ -60,9 +63,17 @@ def extract_text_from_docx(source: BinaryIO | str) -> str:
 def split_body_and_bibliography(full_text: str) -> tuple[str, str]:
     match = list(BIB_HEADING.finditer(full_text))
     if not match:
+        alt = re.search(r"(?m)(?:^|\n)\s*REFERENCIAS(?:\s*$|\s+(?=[A-ZÁÉÍÓÚÑ]))", full_text, re.I)
+        if alt:
+            idx = alt.start()
+            return full_text[:idx].strip(), full_text[idx:].strip()
         return full_text, ""
     idx = match[-1].start()
-    return full_text[:idx].strip(), full_text[idx:].strip()
+    body = full_text[:idx].strip()
+    bib = full_text[idx:].strip()
+    bib = re.sub(r"^(?i)BIBLIOGRAF[IÍ]A\s*", "BIBLIOGRAFÍA\n", bib)
+    bib = re.sub(r"^(?i)REFERENCIAS\s*", "REFERENCIAS\n", bib)
+    return body, bib
 
 
 def remove_index_duplicate(body: str) -> str:
@@ -286,15 +297,18 @@ def parse_thesis_file(source: BinaryIO | str, filename: str = "tesis.docx") -> d
     from savt.bibliography_styles import (
         detect_citation_style,
         extract_apa_citations,
-        infer_topic_keywords,
+        infer_topic_keywords_from_document,
         parse_bibliography_by_style,
     )
+    from savt.document_sections import extract_title, get_section_map
     from savt.pdf_parser import prepare_pdf_text, remove_pdf_front_matter
+    from savt.text_normalize import normalize_full_document_text
 
     pdf_page_count = None
     lower_name = filename.lower()
     if lower_name.endswith(".pdf"):
         full_text, pdf_page_count = prepare_pdf_text(source)
+        full_text = normalize_full_document_text(full_text)
         body_raw, bib_text = split_body_and_bibliography(full_text)
         body = remove_pdf_front_matter(body_raw)
     else:
@@ -305,7 +319,9 @@ def parse_thesis_file(source: BinaryIO | str, filename: str = "tesis.docx") -> d
     citation_style = detect_citation_style(body, bib_text)
     bibliography = parse_bibliography_by_style(bib_text, citation_style)
     sections = split_sections(body)
-    topic_keywords = infer_topic_keywords(body, filename)
+    section_map = get_section_map(body)
+    topic_keywords = infer_topic_keywords_from_document(full_text, body, filename)
+    document_title = extract_title(full_text, filename)
 
     if citation_style == "apa":
         cited_keys, citation_contexts = extract_apa_citations(body)
@@ -338,11 +354,13 @@ def parse_thesis_file(source: BinaryIO | str, filename: str = "tesis.docx") -> d
         "bibliography_text": bib_text,
         "bibliography": bibliography,
         "sections": sections,
+        "section_map": section_map,
         "cited_numbers": cited_numbers,
         "cited_keys": cited_keys,
         "citation_contexts": citation_contexts_numbered,
         "citation_contexts_apa": citation_contexts_keys,
         "topic_keywords": topic_keywords,
+        "document_title": document_title,
         "research_questions": extract_research_questions(body),
         "objectives": extract_objectives(body),
         "conclusions": extract_conclusions(body),

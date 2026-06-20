@@ -21,6 +21,19 @@ CONTRIBUTION_MARKERS = [
     "líneas futuras",
     "contribución al campo",
     "contribución al conocimiento",
+    "en suma",
+    "las conclusiones",
+    "constituye hoy",
+    "factor determinante",
+    "desafío que queda",
+    "políticas públicas",
+    "diagnóstico",
+    "traducir este",
+]
+
+CONTRIBUTION_PATTERNS = [
+    r"\b(aporte|contribuci[oó]n|implicacion|recomendacion|hallazgo|novedad)\w*\b",
+    r"\b(en suma|por lo tanto|en conclusi[oó]n)\b",
 ]
 
 OWN_DATA_MARKERS = [
@@ -53,6 +66,9 @@ def audit_originality(parsed: dict, config: AuditConfig) -> tuple[list[Finding],
     level = config.profile.originality_level
 
     contribution_in_conc = sum(1 for m in CONTRIBUTION_MARKERS if m in lower_conc)
+    contribution_in_conc += sum(
+        1 for p in CONTRIBUTION_PATTERNS if re.search(p, lower_conc) and len(lower_conc) > 400
+    )
     contribution_in_body = sum(1 for m in CONTRIBUTION_MARKERS if m in lower_body)
     own_data = sum(1 for m in OWN_DATA_MARKERS if m in lower_body)
     publications = sum(1 for m in PUBLICATION_MARKERS if m in lower_body)
@@ -88,16 +104,28 @@ def audit_originality(parsed: dict, config: AuditConfig) -> tuple[list[Finding],
     dashboard["score_proxy"] = min(proxy, 100)
 
     if level == "basic":
-        if contribution_in_conc == 0:
+        if contribution_in_conc < 2 and len(conclusions) > 400:
             findings.append(
                 Finding(
                     module="Originalidad",
                     severity="info",
-                    title="Aporte personal poco explicitado en conclusiones",
-                    detail="No se detectaron formulaciones explícitas de aporte o contribución.",
-                    how_to_fix=(
-                        "En conclusiones, indique qué aporta su trabajo al campo o a la práctica profesional."
+                    title="Aporte personal mejorable en conclusiones",
+                    detail=(
+                        "Las conclusiones podrían explicitar con mayor claridad "
+                        "el aporte al campo o a la práctica profesional."
                     ),
+                    how_to_fix=(
+                        "Agregue un párrafo final con contribuciones, implicancias y recomendaciones."
+                    ),
+                )
+            )
+        elif contribution_in_conc >= 2 or (contribution_in_conc >= 1 and len(conclusions) > 800):
+            findings.append(
+                Finding(
+                    module="Originalidad",
+                    severity="ok",
+                    title="Aporte personal identificado",
+                    detail=f"Marcadores de contribución detectados: {contribution_in_conc + contribution_in_body}.",
                 )
             )
         else:
@@ -105,8 +133,8 @@ def audit_originality(parsed: dict, config: AuditConfig) -> tuple[list[Finding],
                 Finding(
                     module="Originalidad",
                     severity="ok",
-                    title="Aporte personal identificado",
-                    detail=f"Marcadores de contribución detectados: {contribution_in_conc + contribution_in_body}.",
+                    title="Conclusiones con cierre argumental detectado",
+                    detail="Se identificó desarrollo conclusivo aunque el aporte podría explicitarse más.",
                 )
             )
         return findings, dashboard

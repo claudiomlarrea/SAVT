@@ -40,6 +40,7 @@ def run_audit(
         config.max_doi_checks = max_doi_checks
 
     parsed = parse_thesis_file(source, filename=filename)
+    config.resolve_for_document(parsed.get("full_text", ""), parsed.get("page_estimate", 0))
     findings = []
 
     structure_findings, structure_dashboard = audit_structure(parsed)
@@ -98,8 +99,9 @@ def run_audit(
             "citation_style": parsed.get("citation_style"),
             "file_type": parsed.get("file_type"),
             "pdf_page_count": parsed.get("pdf_page_count"),
-            "profile_id": config.profile_id,
+            "profile_id": config._resolved_profile_id or config.profile_id,
             "profile_label": config.profile.label,
+            "document_title": parsed.get("document_title", ""),
         },
     )
 

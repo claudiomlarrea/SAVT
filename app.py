@@ -58,12 +58,12 @@ def render_sidebar(report=None) -> AuditConfig:
 
     profile_ids = [p[0] for p in profile_options()]
     profile_labels = {p[0]: p[1] for p in profile_options()}
-    default_profile = st.session_state.get("profile_id", "grado_generico")
+    default_profile = st.session_state.get("profile_id", "auto")
     if default_profile not in profile_ids:
-        default_profile = "grado_generico"
+        default_profile = "auto"
 
     profile_id = st.sidebar.selectbox(
-        "Perfil institucional",
+        "Nivel de titulación",
         options=profile_ids,
         index=profile_ids.index(default_profile),
         format_func=lambda x: profile_labels[x],

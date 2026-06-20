@@ -2,23 +2,8 @@ from __future__ import annotations
 
 import re
 
-from savt.bibliography_styles import apa_keys_match
+from savt.bibliography_styles import apa_keys_match, topical_match
 from savt.models import Finding, ReferenceEntry
-
-DEFAULT_TOPICAL_KEYWORDS = [
-    "diastasis",
-    "rectus",
-    "abdomin",
-    "hernia",
-    "plicat",
-    "postpartum",
-    "postgest",
-    "dermolipect",
-    "abdominal wall",
-    "linea alba",
-    "línea alba",
-    "abdominoplast",
-]
 
 GENERIC_STOPWORDS = {
     "the",
@@ -44,31 +29,29 @@ GENERIC_STOPWORDS = {
 }
 
 
-def _topic_keywords(parsed: dict) -> list[str]:
-    inferred = parsed.get("topic_keywords") or []
-    if inferred:
-        return inferred + DEFAULT_TOPICAL_KEYWORDS
-    return DEFAULT_TOPICAL_KEYWORDS
-
-
-def _tokens(text: str) -> set[str]:
-    words = re.findall(r"[a-záéíóúñ]{4,}", text.lower())
-    return {w for w in words if w not in GENERIC_STOPWORDS}
-
-
 def topical_score(reference: ReferenceEntry, paragraph: str, keywords: list[str]) -> float:
-    ref_text = reference.raw.lower()
-    ref_topical = any(k in ref_text for k in keywords)
-    para_tokens = _tokens(paragraph)
-    ref_tokens = _tokens(reference.raw)
+    ref_topical = topical_match(reference, keywords)
+    para_tokens = {
+        w
+        for w in re.findall(r"[a-záéíóúñ]{4,}", paragraph.lower())
+        if w not in GENERIC_STOPWORDS
+    }
+    ref_tokens = {
+        w
+        for w in re.findall(r"[a-záéíóúñ]{4,}", reference.raw.lower())
+        if w not in GENERIC_STOPWORDS
+    }
     overlap = len(para_tokens & ref_tokens) / max(len(para_tokens), 1) if para_tokens and ref_tokens else 0.0
     keyword_bonus = 0.35 if ref_topical else 0.0
     return min(1.0, overlap + keyword_bonus)
 
 
+def _topic_keywords(parsed: dict) -> list[str]:
+    return parsed.get("topic_keywords") or []
+
+
 def is_reference_topical(reference: ReferenceEntry, keywords: list[str]) -> bool:
-    text = reference.raw.lower()
-    return any(k in text for k in keywords)
+    return topical_match(reference, keywords)
 
 
 def _audit_numbered_citations(parsed: dict, keywords: list[str]) -> list[Finding]:

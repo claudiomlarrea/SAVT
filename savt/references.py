@@ -13,8 +13,10 @@ TIMEOUT = 8
 
 def _normalize_doi(doi: str) -> str:
     doi = doi.strip().lower()
-    doi = doi.replace("https://doi.org/", "")
-    doi = doi.replace("http://doi.org/", "")
+    doi = re.sub(r"^https?://(dx\.)?doi\.org/", "", doi)
+    doi = re.sub(r"^https?://doi\.org/", "", doi)
+    while doi.startswith("https://doi.org/") or doi.startswith("http://doi.org/"):
+        doi = re.sub(r"^https?://doi\.org/", "", doi)
     return doi.rstrip(".,;")
 
 

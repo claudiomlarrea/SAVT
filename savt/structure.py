@@ -5,7 +5,41 @@ import re
 from savt.models import Finding
 
 
+from savt.document_sections import extract_section, get_section_map
+
+
 def _find_block(body: str, sections: dict[str, str], keywords: list[str]) -> str:
+    section_map = sections if isinstance(sections, dict) else {}
+    alias_map = {
+        "introduc": "introduccion",
+        "planteamiento": "introduccion",
+        "marco teórico": "marco_teorico",
+        "marco teorico": "marco_teorico",
+        "marco conceptual": "marco_teorico",
+        "fundament": "marco_teorico",
+        "estado del arte": "marco_teorico",
+        "referencial teórico": "marco_teorico",
+        "metodolog": "metodologia",
+        "metodo": "metodologia",
+        "materiales y métodos": "metodologia",
+        "material y metodo": "metodologia",
+        "resultado": "resultados",
+        "discusi": "discusion",
+        "conclus": "conclusiones",
+    }
+    for keyword in keywords:
+        key = alias_map.get(keyword.lower())
+        if key and section_map.get(key):
+            text = section_map[key]
+            if len(text) > 200:
+                return text
+
+    mapped = get_section_map(body)
+    for keyword in keywords:
+        key = alias_map.get(keyword.lower())
+        if key and mapped.get(key):
+            return mapped[key]
+
     numeric_hints = {k for k in keywords if re.match(r"^\d", k)}
     semantic_hints = [k for k in keywords if not re.match(r"^\d", k)]
 
@@ -22,10 +56,9 @@ def _find_block(body: str, sections: dict[str, str], keywords: list[str]) -> str
         return best_text
 
     for word in semantic_hints:
-        pattern = rf"(?is){re.escape(word)}.+?(?:\n(?:CAPÍTULO|CAPITULO|\d+\.\s+[A-Z])|\Z)"
-        match = re.search(pattern, body)
-        if match and len(match.group(0)) > 200:
-            return match.group(0)
+        chunk = extract_section(body, (word,))
+        if len(chunk) > 200:
+            return chunk
     return ""
 
 
@@ -149,19 +182,22 @@ def _build_discussion_checks(discussion: str) -> list[dict]:
 def audit_structure(parsed: dict) -> tuple[list[Finding], dict]:
     findings: list[Finding] = []
     body = parsed["body"]
-    sections = parsed["sections"]
+    sections = parsed.get("sections", {})
+    section_map = parsed.get("section_map") or get_section_map(body)
+    combined_sections = dict(section_map)
+    combined_sections.update(sections)
     conclusions = parsed.get("conclusions", "")
 
-    intro = _find_block(body, sections, ["introduc", "planteamiento", "1.4", "1.5"])
-    method = _find_block(body, sections, ["metodolog", "metodo", "materiales y métodos", "material y metodo"])
+    intro = _find_block(body, combined_sections, ["introduc", "planteamiento", "1.4", "1.5"])
+    method = _find_block(body, combined_sections, ["metodolog", "metodo", "materiales y métodos", "material y metodo"])
     marco = _find_block(
         body,
-        sections,
+        combined_sections,
         ["marco teórico", "marco teorico", "marco conceptual", "fundament", "estado del arte", "referencial teórico"],
     )
-    results = _find_block(body, sections, ["resultado"])
-    discussion = _find_block(body, sections, ["discusi"])
-    conclusions_block = conclusions or _find_block(body, sections, ["conclus"])
+    results = _find_block(body, combined_sections, ["resultado"])
+    discussion = _find_block(body, combined_sections, ["discusi"])
+    conclusions_block = conclusions or _find_block(body, combined_sections, ["conclus"])
 
     intro_scope = body[:20000] if parsed.get("research_questions") else (intro or body[:20000])
     method_scope = method or body

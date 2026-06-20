@@ -3,8 +3,12 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from savt.bibliography_styles import apa_keys_match
-from savt.citations import is_reference_topical, _topic_keywords
+from savt.bibliography_styles import (
+    apa_keys_match,
+    citation_present_in_bibliography_text,
+    is_institutional_citation_key,
+    topical_match,
+)
 from savt.models import Finding, ReferenceEntry
 from savt.references import validate_doi
 
@@ -60,6 +64,10 @@ def analyze_unmatched_apa(parsed: dict, bibliography: dict[int, ReferenceEntry])
     for key in sorted(parsed.get("cited_keys", set())):
         if apa_keys_match(key, bib_keys):
             continue
+        if is_institutional_citation_key(key):
+            continue
+        if citation_present_in_bibliography_text(key, parsed.get("bibliography_text", "")):
+            continue
         author, year = key.split("|", 1) if "|" in key else (key, "")
         items.append(
             {
@@ -99,17 +107,29 @@ def analyze_out_of_period(
 def analyze_off_topic(
     bibliography: dict[int, ReferenceEntry], parsed: dict
 ) -> list[dict]:
-    keywords = _topic_keywords(parsed)
+    keywords = parsed.get("topic_keywords") or []
+    if len(keywords) < 3 or not bibliography:
+        return []
+
     items: list[dict] = []
     for num, ref in sorted(bibliography.items()):
-        if not is_reference_topical(ref, keywords):
+        if not topical_match(ref, keywords):
             items.append(
                 {
                     "number": num,
                     "summary": _ref_summary(num, ref),
-                    "reason": "No contiene términos clave inferidos del título/tema del trabajo.",
+                    "reason": (
+                        "No se encontró coincidencia clara con palabras clave del tema "
+                        f"({', '.join(keywords[:6])})."
+                    ),
                 }
             )
+
+    ratio = len(items) / len(bibliography)
+    if ratio > 0.5:
+        return []
+    if ratio < 0.12:
+        return []
     return items
 
 

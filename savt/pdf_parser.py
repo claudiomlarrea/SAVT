@@ -49,6 +49,8 @@ def remove_pdf_front_matter(body: str) -> str:
         r"1\.1\s+Presentaci[oó]n del tema\s*\n",
         r"CAPÍTULO I\.\s*INTRODUCCIÓN\s*\n",
         r"1\.\s+Introducci[oó]n\s*\n",
+        r"(?m)^INTRODUCCI[ÓO]N\s*\n",
+        r"Presentaci[oó]n del Trabajo(?: de Tesis| Final)?\s*\n",
     ]
     for pattern in markers:
         match = re.search(pattern, body, re.IGNORECASE)
