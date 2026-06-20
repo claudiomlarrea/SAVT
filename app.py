@@ -58,14 +58,17 @@ def render_sidebar(report=None) -> AuditConfig:
 
     profile_ids = [p[0] for p in profile_options()]
     profile_labels = {p[0]: p[1] for p in profile_options()}
+    # Streamlit Cloud puede reciclar session_state con ids viejos del sidebar.
     default_profile = st.session_state.get("profile_id", "auto")
     if default_profile not in profile_ids:
         default_profile = "auto"
+        st.session_state["profile_id"] = default_profile
+    selected_index = profile_ids.index(default_profile) if default_profile in profile_ids else 0
 
     profile_id = st.sidebar.selectbox(
         "Nivel de titulación",
         options=profile_ids,
-        index=profile_ids.index(default_profile),
+        index=selected_index,
         format_func=lambda x: profile_labels[x],
     )
     profile = PROFILES[profile_id]
