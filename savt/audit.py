@@ -5,7 +5,6 @@ from savt.bibliography_analysis import build_bibliography_details
 from savt.citations import audit_citations
 from savt.coherence import audit_coherence
 from savt.content_quality import audit_content_quality
-from savt.defense_prep import build_defense_prep
 from savt.ethics import audit_ethics
 from savt.figures import analyze_figures
 from savt.formal_requirements import run_formal_audit
@@ -119,6 +118,5 @@ def run_audit(
         "originality_dashboard": originality_dashboard,
         "config": config,
     }
-    extras["defense_prep"] = build_defense_prep(report, parsed, extras)
     report.metadata["dashboard"] = build_dashboard(report, parsed, extras)
     return report

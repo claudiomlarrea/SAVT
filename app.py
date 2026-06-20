@@ -42,7 +42,7 @@ def render_header() -> None:
                 <p class="savt-subtitle">{__app_name__} · v{__version__}</p>
                 <p class="savt-desc">
                     Pre-auditoría académica integral de tesis y trabajos finales: estructura, coherencia,
-                    normativa institucional, integridad, ética, profundidad y preparación para la defensa.
+                    normativa institucional, integridad, ética y profundidad.
                     Genera observaciones y recomendaciones antes de la evaluación del jurado.
                 </p>
                 <p class="savt-institution">Universidad Católica de Cuyo · Observatorio de Inteligencia Artificial</p>
@@ -598,22 +598,6 @@ def render_originality(dashboard: dict) -> None:
         st.metric("Nivel exigido", orig.get("level", "—"))
 
 
-def render_defense_prep(dashboard: dict) -> None:
-    prep = dashboard.get("defense_prep") or {}
-    if not prep:
-        return
-    st.markdown("## Preparación para la defensa oral")
-    st.caption("Preguntas probables derivadas de hallazgos y estándares de jurados")
-
-    for idx, item in enumerate(prep.get("questions") or [], start=1):
-        st.markdown(f"**{idx}. [{item.get('category', 'General')}]** {item.get('question', '')}")
-        st.caption(f"Basado en: {item.get('based_on', '—')}")
-
-    st.markdown("**Recomendaciones para la defensa:**")
-    for tip in prep.get("tips") or []:
-        st.markdown(f"- {tip}")
-
-
 def render_findings_table(report) -> None:
     with st.expander("Detalle completo de hallazgos (filtros avanzados)", expanded=False):
         rows = findings_dataframe_rows(report)
@@ -700,7 +684,7 @@ def main() -> None:
         st.info(
             "Suba un archivo .docx o .pdf para iniciar la pre-auditoría académica. "
             "Seleccione el perfil institucional en la barra lateral (UCCuyo, UNCUyo, posgrado). "
-            "El informe cubre estructura, normativa, integridad, ética, profundidad y defensa oral."
+            "El informe cubre estructura, normativa, integridad, ética y profundidad."
         )
         return
 
@@ -747,8 +731,6 @@ def main() -> None:
     render_objectives(dashboard)
     render_bibliography(dashboard)
     render_figures_tables(dashboard)
-    st.divider()
-    render_defense_prep(dashboard)
     st.divider()
     render_findings_table(report)
     render_bibliography_table(report)

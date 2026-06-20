@@ -288,12 +288,7 @@ def build_report_docx(report: AuditReport, dashboard: dict) -> bytes:
     _add_label_paragraph(doc, "Densidad de citas marco", str(content.get("citation_density_marco", 0)))
     _add_label_paragraph(doc, "Índice proxy originalidad", f"{orig.get('score_proxy', 0)}/100")
 
-    _add_heading(doc, "9. Preparación defensa oral", 1)
-    prep = dashboard.get("defense_prep") or {}
-    for idx, item in enumerate(prep.get("questions") or [], start=1):
-        _add_bullet(doc, f"{idx}. [{item.get('category', '')}] {item.get('question', '')}")
-
-    _add_heading(doc, "10. Revisión por capítulos", 1)
+    _add_heading(doc, "9. Revisión por capítulos", 1)
     for review in dashboard.get("chapter_reviews") or []:
         status = "Conforme" if review.get("ok") else "Requiere revisión"
         _add_heading(doc, f"{review['title']} — {status}", 2)
@@ -308,7 +303,7 @@ def build_report_docx(report: AuditReport, dashboard: dict) -> bytes:
         if review.get("how_to_fix"):
             _add_label_paragraph(doc, "Cómo corregir", review["how_to_fix"])
 
-    _add_heading(doc, "11. Bibliografía", 1)
+    _add_heading(doc, "10. Bibliografía", 1)
     bib = dashboard.get("bibliography_dashboard", {})
     lines = [
         f"Estilo: {bib.get('style', '—')}",
@@ -330,7 +325,7 @@ def build_report_docx(report: AuditReport, dashboard: dict) -> bytes:
             cites = ", ".join(entry.get("citations_in_text") or [])
             _add_bullet(doc, f"{cites} (clave: {entry.get('key', '')})")
 
-    _add_heading(doc, "12. Detalle de hallazgos", 1)
+    _add_heading(doc, "11. Detalle de hallazgos", 1)
     rows = findings_dataframe_rows(report)
     if rows:
         table = doc.add_table(rows=1, cols=4)

@@ -445,7 +445,6 @@ def build_dashboard(report: AuditReport, parsed: dict, extras: dict) -> dict:
         "ethics_dashboard": extras.get("ethics_dashboard") or {},
         "content_dashboard": extras.get("content_dashboard") or {},
         "originality_dashboard": extras.get("originality_dashboard") or {},
-        "defense_prep": extras.get("defense_prep") or {},
     }
 
 
