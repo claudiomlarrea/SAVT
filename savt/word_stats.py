@@ -1,67 +1,68 @@
-"""Conteo de palabras total y por apartados detectados en la tesis."""
+"""Conteo de palabras total y por apartados canónicos de la tesis."""
 
 from __future__ import annotations
 
 import re
 
 from savt.document_sections import get_section_map
-from savt.section_resolver import discover_headings
-
-ROLE_LABELS: dict[str, str] = {
-    "presentacion": "Presentación / resumen",
-    "introduccion": "Introducción",
-    "marco_teorico": "Marco teórico",
-    "metodologia": "Metodología",
-    "resultados": "Resultados",
-    "discusion": "Discusión",
-    "conclusiones": "Conclusiones",
-    "objetivos": "Objetivos",
-}
-
-_SKIP_HEADING = re.compile(r"\b(BIBLIOGRAF[IÍ]A|REFERENCIAS|ANEXOS?)\b", re.I)
 
 
 def count_words(text: str) -> int:
     return len(re.findall(r"\b\w+\b", text or "", re.UNICODE))
 
 
+# Orden de presentación y etiquetas para la tabla agregada.
+CANONICAL_SECTION_ORDER: tuple[tuple[str, str], ...] = (
+    ("presentacion", "Presentación / resumen"),
+    ("introduccion", "Introducción"),
+    ("objetivos", "Objetivos"),
+    ("marco_teorico", "Marco teórico y estado del arte"),
+    ("metodologia", "Metodología"),
+    ("resultados", "Resultados"),
+    ("discusion", "Discusión"),
+    ("conclusiones", "Conclusiones"),
+)
+
+
+def _canonical_word_map(parsed: dict) -> dict[str, str]:
+    body = parsed.get("body", "")
+    return parsed.get("section_map") or get_section_map(body)
+
+
 def build_word_statistics(parsed: dict) -> dict:
     body = parsed.get("body", "")
     total_body = parsed.get("word_count") or count_words(body)
     bib_words = parsed.get("bibliography_word_count", 0)
+    role_texts = _canonical_word_map(parsed)
 
     sections: list[dict] = []
-    headings = discover_headings(body)
+    classified_words = 0
 
-    for heading in headings:
-        if _SKIP_HEADING.search(heading.title):
+    for role, label in CANONICAL_SECTION_ORDER:
+        text = role_texts.get(role, "")
+        words = count_words(text)
+        if words <= 0:
             continue
-        chunk = body[heading.start + len(heading.title) : heading.end].strip()
-        words = count_words(chunk)
-        if re.search(r"\b(PARTE|CAPÍTULO|CAPITULO|TOMO)\b", heading.title, re.I) and words < 50:
-            continue
-        if words < 25 and not heading.role:
-            continue
+        classified_words += words
         sections.append(
             {
-                "title": heading.title.strip()[:120],
+                "title": label,
                 "words": words,
-                "role": heading.role or "",
-                "role_label": ROLE_LABELS.get(heading.role, "") if heading.role else "",
+                "role": role,
+                "role_label": label,
             }
         )
 
-    if not sections:
-        section_map = parsed.get("section_map") or get_section_map(body)
-        for role, text in section_map.items():
-            sections.append(
-                {
-                    "title": ROLE_LABELS.get(role, role.replace("_", " ").title()),
-                    "words": count_words(text),
-                    "role": role,
-                    "role_label": ROLE_LABELS.get(role, ""),
-                }
-            )
+    other_words = max(0, total_body - classified_words)
+    if other_words >= 50:
+        sections.append(
+            {
+                "title": "Otros apartados (anexos, índices, material no clasificado)",
+                "words": other_words,
+                "role": "otros",
+                "role_label": "Otros",
+            }
+        )
 
     total_for_pct = max(total_body, 1)
     for item in sections:
@@ -73,4 +74,5 @@ def build_word_statistics(parsed: dict) -> dict:
         "total_body_words": total_body,
         "bibliography_words": bib_words,
         "sections": sections,
+        "classified_body_words": classified_words,
     }

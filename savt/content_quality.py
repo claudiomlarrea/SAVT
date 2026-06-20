@@ -79,8 +79,9 @@ def audit_content_quality(parsed: dict, config: AuditConfig) -> tuple[list[Findi
             ),
             "bibliography_words": "Palabras detectadas en la sección de bibliografía/referencias.",
             "sections": (
-                "Extensión bajo cada encabezado detectado y su porcentaje sobre el total del cuerpo. "
-                "Subsecciones pueden solaparse con capítulos padre; la suma puede superar 100%."
+                "Total de palabras por apartado canónico (presentación, marco teórico, "
+                "metodología, resultados, etc.). Cada fila suma todo el contenido detectado "
+                "bajo ese rol, sin listar subsecciones."
             ),
             "marco_word_count": (
                 "Palabras en marco teórico / revisión bibliográfica (rol canónico). "

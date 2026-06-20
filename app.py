@@ -589,18 +589,16 @@ def render_content_depth(dashboard: dict) -> None:
 
     sections = content.get("sections") or []
     if sections:
-        st.markdown("**Palabras por capítulo o apartado**")
+        st.markdown("**Palabras por apartado (total agregado)**")
         st.caption(help_text.get("sections", ""))
-        rows = []
-        for item in sections:
-            rows.append(
-                {
-                    "Apartado": item.get("title", "—"),
-                    "Palabras": item.get("words", 0),
-                    "% del total": item.get("percent_label", "—"),
-                    "Tipo": item.get("role_label") or "—",
-                }
-            )
+        rows = [
+            {
+                "Apartado": item.get("title", "—"),
+                "Palabras": item.get("words", 0),
+                "% del total": item.get("percent_label", "—"),
+            }
+            for item in sections
+        ]
         st.dataframe(rows, use_container_width=True, hide_index=True)
 
     st.markdown("**Indicadores del marco teórico**")
