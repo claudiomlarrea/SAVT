@@ -242,7 +242,58 @@ def build_report_docx(report: AuditReport, dashboard: dict) -> bytes:
         jury.get("approval_probability", "—"),
     )
 
-    _add_heading(doc, "5. Revisión por capítulos", 1)
+    _add_label_paragraph(
+        doc,
+        "Probabilidad estimada de aprobación",
+        jury.get("approval_probability", "—"),
+    )
+    if jury.get("disclaimer"):
+        doc.add_paragraph(jury["disclaimer"]).italic = True
+
+    _add_heading(doc, "5. Normativa institucional", 1)
+    _add_label_paragraph(doc, "Perfil", dashboard.get("profile_label", "—"))
+    formal = dashboard.get("formal_dashboard") or {}
+    for key, label in [
+        ("portada_completa", "Portada completa"),
+        ("indice", "Índice general"),
+        ("indice_figuras", "Índice de figuras"),
+        ("indice_tablas", "Índice de tablas"),
+        ("palabras_clave", "Palabras clave"),
+    ]:
+        if key in formal:
+            _add_bullet(doc, f"{label}: {'Sí' if formal[key] else 'No detectado'}")
+    if formal.get("abstract_words"):
+        _add_label_paragraph(doc, "Resumen (palabras)", str(formal["abstract_words"]))
+
+    _add_heading(doc, "6. Integridad académica", 1)
+    integrity = dashboard.get("integrity_dashboard") or {}
+    if integrity.get("disclaimer"):
+        doc.add_paragraph(integrity["disclaimer"])
+    idx = integrity.get("similarity_index")
+    if idx is not None:
+        _add_label_paragraph(doc, "Índice de similitud externo", f"{idx:.1f}%")
+    else:
+        doc.add_paragraph("Sin reporte de similitud externo proporcionado.")
+
+    _add_heading(doc, "7. Ética de investigación", 1)
+    ethics = dashboard.get("ethics_dashboard") or {}
+    for item in ethics.get("checklist") or []:
+        mark = "Sí" if item.get("found") else "No detectado"
+        _add_bullet(doc, f"{item.get('label', '')}: {mark}")
+
+    _add_heading(doc, "8. Profundidad y originalidad", 1)
+    content = dashboard.get("content_dashboard") or {}
+    orig = dashboard.get("originality_dashboard") or {}
+    _add_label_paragraph(doc, "Palabras marco teórico", str(content.get("marco_word_count", 0)))
+    _add_label_paragraph(doc, "Densidad de citas marco", str(content.get("citation_density_marco", 0)))
+    _add_label_paragraph(doc, "Índice proxy originalidad", f"{orig.get('score_proxy', 0)}/100")
+
+    _add_heading(doc, "9. Preparación defensa oral", 1)
+    prep = dashboard.get("defense_prep") or {}
+    for idx, item in enumerate(prep.get("questions") or [], start=1):
+        _add_bullet(doc, f"{idx}. [{item.get('category', '')}] {item.get('question', '')}")
+
+    _add_heading(doc, "10. Revisión por capítulos", 1)
     for review in dashboard.get("chapter_reviews") or []:
         status = "Conforme" if review.get("ok") else "Requiere revisión"
         _add_heading(doc, f"{review['title']} — {status}", 2)
@@ -257,7 +308,7 @@ def build_report_docx(report: AuditReport, dashboard: dict) -> bytes:
         if review.get("how_to_fix"):
             _add_label_paragraph(doc, "Cómo corregir", review["how_to_fix"])
 
-    _add_heading(doc, "6. Bibliografía", 1)
+    _add_heading(doc, "11. Bibliografía", 1)
     bib = dashboard.get("bibliography_dashboard", {})
     lines = [
         f"Estilo: {bib.get('style', '—')}",
@@ -279,7 +330,7 @@ def build_report_docx(report: AuditReport, dashboard: dict) -> bytes:
             cites = ", ".join(entry.get("citations_in_text") or [])
             _add_bullet(doc, f"{cites} (clave: {entry.get('key', '')})")
 
-    _add_heading(doc, "7. Detalle de hallazgos", 1)
+    _add_heading(doc, "12. Detalle de hallazgos", 1)
     rows = findings_dataframe_rows(report)
     if rows:
         table = doc.add_table(rows=1, cols=4)

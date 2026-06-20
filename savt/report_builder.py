@@ -280,6 +280,10 @@ def build_jury_assessment(report: AuditReport, warnings: list[dict]) -> dict:
         "strengths": strengths[:5],
         "weaknesses": weaknesses[:5],
         "approval_probability": probability,
+        "disclaimer": (
+            "Estimación heurística basada en hallazgos formales. "
+            "No sustituye la evaluación del director ni del jurado examinador."
+        ),
     }
 
 
@@ -357,6 +361,9 @@ def build_dashboard(report: AuditReport, parsed: dict, extras: dict) -> dict:
     jury = build_jury_assessment(report, warnings_list)
     interpretation = icao_interpretation(report.score)
 
+    config = extras.get("config")
+    profile_label = report.metadata.get("profile_label", "—")
+
     return {
         "icai": report.score,
         "icai_interpretation": interpretation,
@@ -377,6 +384,13 @@ def build_dashboard(report: AuditReport, parsed: dict, extras: dict) -> dict:
         "jury": jury,
         "checklist": checklist,
         "chapter_reviews": chapter_reviews,
+        "profile_label": profile_label,
+        "formal_dashboard": extras.get("formal_dashboard") or {},
+        "integrity_dashboard": extras.get("integrity_dashboard") or {},
+        "ethics_dashboard": extras.get("ethics_dashboard") or {},
+        "content_dashboard": extras.get("content_dashboard") or {},
+        "originality_dashboard": extras.get("originality_dashboard") or {},
+        "defense_prep": extras.get("defense_prep") or {},
     }
 
 

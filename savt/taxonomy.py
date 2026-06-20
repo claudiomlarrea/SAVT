@@ -14,7 +14,12 @@ MODULE_TO_AREA: dict[str, str] = {
     "Metodología": "Metodología",
     "Conclusiones": "Conclusiones",
     "Citas": "Citas",
-    "Similitud": "Redacción",
+    "Similitud": "Integridad",
+    "Integridad": "Integridad",
+    "Ética": "Ética",
+    "Originalidad": "Originalidad",
+    "Normativa": "Normativa institucional",
+    "Contenido": "Profundidad académica",
     "Evaluación": "Coherencia",
 }
 
@@ -34,6 +39,11 @@ AUDIT_AREAS: list[str] = [
     "Figuras y tablas",
     "Redacción",
     "Conclusiones",
+    "Normativa institucional",
+    "Integridad",
+    "Ética",
+    "Originalidad",
+    "Profundidad académica",
 ]
 
 GUIDANCE: dict[str, dict[str, str]] = {

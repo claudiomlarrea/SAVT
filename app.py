@@ -7,7 +7,9 @@ import streamlit as st
 
 from savt import __app_name__, __version__
 from savt.audit import run_audit
+from savt.audit_config import AuditConfig
 from savt.export_docx import build_report_docx
+from savt.institutional_profiles import PROFILES, profile_options
 from savt.report_builder import findings_dataframe_rows
 from savt.taxonomy import AUDIT_AREAS, SEVERITY_LABELS
 from savt.ui_branding import LOGO_PATH, inject_branding
@@ -39,9 +41,9 @@ def render_header() -> None:
                 <h1>SAVT</h1>
                 <p class="savt-subtitle">{__app_name__} · v{__version__}</p>
                 <p class="savt-desc">
-                    Sistema de auditoría de tesis y trabajos finales. Diseñada para analizar
-                    la estructura, coherencia y consistencia de todos los apartados del documento,
-                    generando un informe de observaciones y recomendaciones para su mejora académica.
+                    Pre-auditoría académica integral de tesis y trabajos finales: estructura, coherencia,
+                    normativa institucional, integridad, ética, profundidad y preparación para la defensa.
+                    Genera observaciones y recomendaciones antes de la evaluación del jurado.
                 </p>
                 <p class="savt-institution">Universidad Católica de Cuyo · Observatorio de Inteligencia Artificial</p>
             </div>
@@ -50,20 +52,72 @@ def render_header() -> None:
         )
 
 
-def render_sidebar(report=None, min_pages: int = 1, max_pages: int = 300) -> tuple[bool, int, int, int]:
+def render_sidebar(report=None) -> AuditConfig:
     st.sidebar.image(LOGO_PATH, width=120)
     st.sidebar.header("Configuración")
+
+    profile_ids = [p[0] for p in profile_options()]
+    profile_labels = {p[0]: p[1] for p in profile_options()}
+    default_profile = st.session_state.get("profile_id", "grado_generico")
+    if default_profile not in profile_ids:
+        default_profile = "grado_generico"
+
+    profile_id = st.sidebar.selectbox(
+        "Perfil institucional",
+        options=profile_ids,
+        index=profile_ids.index(default_profile),
+        format_func=lambda x: profile_labels[x],
+    )
+    profile = PROFILES[profile_id]
+    st.sidebar.caption(profile.description)
+
     verify_online = st.sidebar.checkbox("Verificar DOI online (Crossref)", value=True)
     max_doi = st.sidebar.slider("Máximo de DOI a verificar", 5, 200, 200)
+
     min_pages = st.sidebar.number_input(
-        "Páginas mínimas objetivo", min_value=1, max_value=300, value=min_pages
+        "Páginas mínimas objetivo",
+        min_value=1,
+        max_value=400,
+        value=profile.min_pages,
     )
     max_pages = st.sidebar.number_input(
-        "Páginas máximas objetivo", min_value=1, max_value=300, value=max_pages
+        "Páginas máximas objetivo",
+        min_value=1,
+        max_value=400,
+        value=profile.max_pages,
     )
+
+    st.sidebar.markdown("**Integridad académica**")
+    use_similarity = st.sidebar.checkbox("Incluir índice de similitud externo", value=False)
+    similarity_index = None
+    plagiarism_text = ""
+    if use_similarity:
+        similarity_index = st.sidebar.slider(
+            "Índice de similitud (Turnitin / iThenticate %)",
+            0.0,
+            50.0,
+            0.0,
+            0.5,
+        )
+        if similarity_index == 0.0:
+            similarity_index = None
+        with st.sidebar.expander("Pegar texto del reporte de similitud", expanded=False):
+            plagiarism_text = st.text_area(
+                "Texto del reporte",
+                height=100,
+                placeholder="Pegue aquí el resumen del reporte Turnitin/iThenticate…",
+                label_visibility="collapsed",
+            )
+
+    st.sidebar.markdown("**Módulos de auditoría**")
+    check_formal = st.sidebar.checkbox("Normativa institucional", value=True)
+    check_ethics = st.sidebar.checkbox("Ética de investigación", value=True)
+    check_originality = st.sidebar.checkbox("Originalidad y aporte", value=True)
+    check_content = st.sidebar.checkbox("Profundidad académica", value=True)
 
     if report:
         with st.sidebar.expander("Datos técnicos del documento", expanded=False):
+            st.write(f"Perfil: {report.metadata.get('profile_label', '—')}")
             st.write(f"Palabras (cuerpo): {report.word_count:,}")
             st.write(f"Referencias: {len(report.bibliography)}")
             st.write(f"Estilo: {report.metadata.get('citation_style', '—').upper()}")
@@ -76,7 +130,20 @@ def render_sidebar(report=None, min_pages: int = 1, max_pages: int = 300) -> tup
 
     st.sidebar.markdown("---")
     st.sidebar.caption(f"Versión {__version__}")
-    return verify_online, max_doi, min_pages, max_pages
+
+    return AuditConfig(
+        profile_id=profile_id,
+        verify_references_online=verify_online,
+        max_doi_checks=max_doi,
+        min_pages=int(min_pages),
+        max_pages=int(max_pages),
+        similarity_index=similarity_index,
+        plagiarism_report_text=plagiarism_text,
+        check_ethics=check_ethics,
+        check_originality=check_originality,
+        check_formal=check_formal,
+        check_content_depth=check_content,
+    )
 
 
 def icon(ok: bool, partial: bool = False) -> str:
@@ -186,7 +253,8 @@ def render_warnings(dashboard: dict) -> None:
 
 def render_jury(dashboard: dict) -> None:
     jury = dashboard["jury"]
-    st.markdown("## Evaluación por SAVT")
+    st.markdown("## Evaluación orientativa por SAVT")
+    st.caption(jury.get("disclaimer", ""))
 
     c1, c2, c3 = st.columns(3)
     with c1:
@@ -413,6 +481,136 @@ def render_figures_tables(dashboard: dict) -> None:
         st.caption(tab["title"][:180])
 
 
+def render_formal(dashboard: dict) -> None:
+    formal = dashboard.get("formal_dashboard") or {}
+    if not formal:
+        return
+    st.markdown("## Normativa institucional")
+    st.caption(f"Perfil: {dashboard.get('profile_label', '—')}")
+
+    items = [
+        ("Portada completa", formal.get("portada_completa")),
+        ("Índice general", formal.get("indice")),
+        ("Índice de figuras", formal.get("indice_figuras")),
+        ("Índice de tablas", formal.get("indice_tablas")),
+        ("Palabras clave", formal.get("palabras_clave")),
+    ]
+    for label, ok in items:
+        if ok is None:
+            continue
+        st.markdown(f"{'✔' if ok else '⚠'} {label}")
+
+    abstract_words = formal.get("abstract_words", 0)
+    if abstract_words:
+        st.markdown(f"**Resumen:** ~{abstract_words} palabras")
+        preview = formal.get("abstract_text_preview", "")
+        if preview:
+            st.caption(preview + "…")
+
+    ref_count = formal.get("reference_count")
+    if ref_count is not None:
+        st.markdown(f"**Referencias detectadas:** {ref_count}")
+
+
+def render_integrity(dashboard: dict) -> None:
+    integrity = dashboard.get("integrity_dashboard") or {}
+    if not integrity:
+        return
+    st.markdown("## Integridad académica")
+    st.info(integrity.get("disclaimer", ""))
+
+    index = integrity.get("similarity_index")
+    source = integrity.get("source", "—")
+    if index is not None:
+        st.markdown(f"**Índice de similitud externo:** {index:.1f}% (fuente: {source})")
+        ai_score = integrity.get("ai_score")
+        if ai_score is not None:
+            st.markdown(f"**Indicador IA en reporte:** {ai_score:.1f}%")
+    else:
+        st.warning(
+            "Sin reporte de similitud externo. SAVT solo detecta repeticiones internas; "
+            "solicite escaneo Turnitin/iThenticate a su director."
+        )
+
+
+def render_ethics(dashboard: dict) -> None:
+    ethics = dashboard.get("ethics_dashboard") or {}
+    if not ethics:
+        return
+    st.markdown("## Ética de investigación")
+    if ethics.get("is_empirical"):
+        st.caption("Investigación empírica detectada — checklist ético")
+    else:
+        st.caption("Estudio documental o sin participantes detectados")
+
+    checklist = ethics.get("checklist") or []
+    for item in checklist:
+        mark = "✔" if item.get("found") else "✖"
+        st.markdown(f"{mark} {item.get('label', '')}")
+
+    found = ethics.get("found_count", 0)
+    total = ethics.get("total", 0)
+    if total:
+        st.progress(found / total if total else 0)
+        st.caption(f"{found}/{total} elementos éticos detectados en el texto")
+
+
+def render_content_depth(dashboard: dict) -> None:
+    content = dashboard.get("content_dashboard") or {}
+    if not content:
+        return
+    st.markdown("## Profundidad académica")
+    cols = st.columns(3)
+    with cols[0]:
+        st.metric("Palabras marco teórico", content.get("marco_word_count", 0))
+    with cols[1]:
+        st.metric("Densidad de citas /100 pal.", content.get("citation_density_marco", 0))
+    with cols[2]:
+        st.metric("Marcadores críticos", content.get("critical_markers_found", 0))
+
+    if content.get("hypothesis_detected"):
+        st.markdown("✔ Hipótesis detectada")
+    results = content.get("results_development")
+    if results and results != "unknown":
+        label = "adecuada" if results == "adequate" else "requiere refuerzo"
+        st.markdown(f"**Desarrollo de resultados:** {label}")
+
+
+def render_originality(dashboard: dict) -> None:
+    orig = dashboard.get("originality_dashboard") or {}
+    if not orig:
+        return
+    st.markdown("## Originalidad y aporte")
+    st.caption(
+        "Indicadores heurísticos — no sustituyen evaluación de originalidad por el jurado."
+    )
+    cols = st.columns(4)
+    with cols[0]:
+        st.metric("Índice proxy", f"{orig.get('score_proxy', 0)}/100")
+    with cols[1]:
+        st.metric("Marcadores de aporte", orig.get("contribution_markers", 0))
+    with cols[2]:
+        st.metric("Datos propios", orig.get("own_data_markers", 0))
+    with cols[3]:
+        st.metric("Nivel exigido", orig.get("level", "—"))
+
+
+def render_defense_prep(dashboard: dict) -> None:
+    prep = dashboard.get("defense_prep") or {}
+    if not prep:
+        return
+    st.markdown("## Preparación para la defensa oral")
+    st.caption("Preguntas probables derivadas de hallazgos y estándares de jurados")
+
+    for idx, item in enumerate(prep.get("questions") or [], start=1):
+        st.markdown(f"**{idx}. [{item.get('category', 'General')}]** {item.get('question', '')}")
+        st.caption(f"Basado en: {item.get('based_on', '—')}")
+
+    st.markdown("**Recomendaciones para la defensa:**")
+    for tip in prep.get("tips") or []:
+        st.markdown(f"- {tip}")
+
+
 def render_findings_table(report) -> None:
     with st.expander("Detalle completo de hallazgos (filtros avanzados)", expanded=False):
         rows = findings_dataframe_rows(report)
@@ -487,7 +685,7 @@ def render_bibliography_table(report) -> None:
 def main() -> None:
     render_header()
     report = st.session_state.get("report")
-    verify_online, max_doi, min_pages, max_pages = render_sidebar(report, 1, 300)
+    config = render_sidebar(report)
 
     uploaded = st.file_uploader(
         "Subir tesis (.docx o .pdf)",
@@ -497,8 +695,9 @@ def main() -> None:
 
     if not uploaded:
         st.info(
-            "Suba un archivo .docx o .pdf para iniciar la auditoría académica. "
-            "El informe incluirá observaciones sobre estructura, bibliografía, coherencia y calidad formal."
+            "Suba un archivo .docx o .pdf para iniciar la pre-auditoría académica. "
+            "Seleccione el perfil institucional en la barra lateral (UCCuyo, UNCUyo, posgrado). "
+            "El informe cubre estructura, normativa, integridad, ética, profundidad y defensa oral."
         )
         return
 
@@ -507,10 +706,10 @@ def main() -> None:
             report = run_audit(
                 io.BytesIO(uploaded.getvalue()),
                 filename=uploaded.name,
-                verify_references_online=verify_online,
-                max_doi_checks=max_doi,
+                config=config,
             )
         st.session_state["report"] = report
+        st.session_state["profile_id"] = config.profile_id
         st.rerun()
 
     report = st.session_state.get("report")
@@ -530,11 +729,23 @@ def main() -> None:
     st.divider()
     render_jury(dashboard)
     st.divider()
+    render_formal(dashboard)
+    st.divider()
+    render_integrity(dashboard)
+    st.divider()
+    render_ethics(dashboard)
+    st.divider()
+    render_content_depth(dashboard)
+    st.divider()
+    render_originality(dashboard)
+    st.divider()
     render_structure(dashboard)
     render_research_question(dashboard)
     render_objectives(dashboard)
     render_bibliography(dashboard)
     render_figures_tables(dashboard)
+    st.divider()
+    render_defense_prep(dashboard)
     st.divider()
     render_findings_table(report)
     render_bibliography_table(report)

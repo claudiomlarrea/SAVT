@@ -1,17 +1,24 @@
 # SAVT — Sistema de Auditoría y Verificación de Tesis
 
-Herramienta institucional para auditar tesis (TFI, Maestría, Doctorado) antes de la entrega definitiva.
+Herramienta institucional para **pre-auditar** tesis (TFI, Maestría, Doctorado) antes de la entrega definitiva.
 
 **Auditor académico** orientado a tesistas, directores y evaluadores: cada hallazgo indica qué significa, por qué importa y cómo corregirlo.
 
-## Funcionalidades (v0.2)
+## Funcionalidades (v0.3)
 
 - Parseo de `.docx` y `.pdf`
+- **Perfiles institucionales** (UCCuyo, UNCUyo, maestría, doctorado, especialización)
 - Escala **ICAI** interpretable (Excelente → No apta)
 - Checklist previo a la entrega
-- Evaluación como jurado (fortalezas, debilidades, probabilidad de aprobación)
+- Evaluación orientativa (fortalezas, debilidades, probabilidad de aprobación)
 - Estructura académica (introducción, metodología, resultados, discusión, conclusiones)
 - Coherencia pregunta → objetivos → resultados → conclusiones
+- **Normativa institucional** (portada, resumen, índices, extensión por perfil)
+- **Integridad académica** (índice Turnitin/iThenticate + similitud interna)
+- **Ética de investigación** (checklist para estudios empíricos)
+- **Profundidad académica** (marco teórico, citas, análisis crítico)
+- **Originalidad y aporte** (indicadores proxy por nivel de titulación)
+- **Preparación para defensa oral** (preguntas probables)
 - Bibliografía APA y Vancouver numerado
 - Figuras y tablas (numeración, cita, fuente)
 - Validación DOI via Crossref (opcional)
@@ -56,13 +63,15 @@ SAVT/
 ├── packages.toml             # Versión Python para Streamlit Cloud
 ├── savt/
 │   ├── audit.py              # Orquestador
-│   ├── report_builder.py     # Informe académico
-│   ├── structure.py          # Estructura de capítulos
-│   ├── objectives_coherence.py
-│   ├── research_question.py
-│   ├── parser.py / pdf_parser.py
-│   ├── citations.py
-│   ├── figures.py / tables.py
+│   ├── audit_config.py       # Configuración de auditoría
+│   ├── institutional_profiles.py
+│   ├── formal_requirements.py
+│   ├── integrity.py
+│   ├── ethics.py
+│   ├── content_quality.py
+│   ├── originality.py
+│   ├── defense_prep.py
+│   ├── report_builder.py
 │   └── ...
 └── README.md
 ```
@@ -70,17 +79,21 @@ SAVT/
 ## Uso
 
 1. Abrir la app (local o Streamlit Cloud).
-2. Subir un `.docx` o `.pdf` de tesis.
-3. Ejecutar auditoría.
-4. Revisar checklist, qué corregir primero y evaluación como jurado.
-5. Descargar informe CSV.
+2. Seleccionar **perfil institucional** en la barra lateral.
+3. Subir un `.docx` o `.pdf` de tesis.
+4. (Opcional) Cargar índice de similitud Turnitin/iThenticate.
+5. Ejecutar auditoría.
+6. Revisar checklist, normativa, integridad, ética, profundidad y preguntas de defensa.
+7. Descargar informe CSV o Word.
 
 ## Limitaciones
 
 - No reemplaza evaluación del director ni del jurado.
 - Heurísticas sobre texto extraído; en PDF pueden perderse matices.
-- Plagio externo e IA: pendiente de integración con servicios especializados.
+- Originalidad y profundidad: indicadores proxy, no juicio experto.
+- Plagio externo: requiere reporte Turnitin/iThenticate (no hay API integrada).
+- Detección de IA: solo si el reporte externo incluye ese dato.
 
 ## Licencia
 
-Uso institucional — Universidad del Salvador / Secretaría de Investigación.
+Uso institucional — Universidad Católica de Cuyo / Observatorio de Inteligencia Artificial.

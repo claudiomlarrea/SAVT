@@ -30,6 +30,8 @@ def audit_similarity(parsed: dict) -> list[Finding]:
                 title="Párrafos duplicados o casi idénticos",
                 detail="Se detectaron repeticiones literales dentro del documento.",
                 evidence="\n".join(duplicated[:5]),
+                why="La repetición interna debilita la coherencia y puede confundir al evaluador.",
+                how_to_fix="Unifique párrafos repetidos o reformule para evitar redundancia.",
             )
         )
 

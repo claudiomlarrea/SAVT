@@ -3,28 +3,34 @@ from __future__ import annotations
 import re
 from collections import Counter
 
+from savt.audit_config import AuditConfig
 from savt.models import Finding
 
 COLLOQUIAL_PATTERNS = [
-    r"\bmuy\b",
     r"\bun montón\b",
     r"\bok\b",
     r"\bgenial\b",
 ]
 
-TERM_VARIANTS = {
-    "diástasis de rectos abdominales": r"diástasis de rectos abdominales",
-    "diástasis de rectos": r"diástasis de rectos(?!\s+abdominales)",
-    "DRA": r"\bDRA\b",
-    "dermolipectomía": r"dermolipectomía",
-    "abdominoplastia": r"abdominoplastia",
-}
+
+def _terminology_variants(body: str, topic_keywords: list[str]) -> dict[str, int]:
+    """Detecta variantes terminológicas a partir de palabras clave del tema."""
+    counts: dict[str, int] = {}
+    for kw in topic_keywords[:6]:
+        if len(kw) < 5:
+            continue
+        pattern = re.escape(kw)
+        count = len(re.findall(pattern, body, re.IGNORECASE))
+        if count >= 3:
+            counts[kw] = count
+    return counts
 
 
-def audit_style(parsed: dict) -> list[Finding]:
+def audit_style(parsed: dict, config: AuditConfig | None = None) -> list[Finding]:
     findings: list[Finding] = []
     body = parsed["body"]
     lower = body.lower()
+    config = config or AuditConfig()
 
     future_in_past_sections = []
     if re.search(r"1\.3 Justificación", body, re.IGNORECASE):
@@ -61,40 +67,15 @@ def audit_style(parsed: dict) -> list[Finding]:
             )
         )
 
-    term_counts = {
-        label: len(re.findall(pattern, body, re.IGNORECASE))
-        for label, pattern in TERM_VARIANTS.items()
-    }
-    if term_counts["DRA"] > 0 and term_counts["diástasis de rectos abdominales"] > 0:
+    topic_kw = parsed.get("topic_keywords") or []
+    term_counts = _terminology_variants(body, topic_kw)
+    if len(term_counts) >= 2:
         findings.append(
             Finding(
                 module="Estilo",
                 severity="ok",
-                title="Terminología clave definida y reutilizada",
-                detail=f"Conteos: {term_counts}",
-            )
-        )
-    elif term_counts["diástasis de rectos"] > 5 and term_counts["diástasis de rectos abdominales"] > 5:
-        findings.append(
-            Finding(
-                module="Estilo",
-                severity="info",
-                title="Variantes terminológicas coexistiendo",
-                detail=(
-                    "Conviven 'diástasis de rectos' y 'diástasis de rectos abdominales'. "
-                    "Definir una forma principal y mantenerla."
-                ),
-                evidence=str(term_counts),
-            )
-        )
-
-    if "plication\"0" in body or 'plication"0' in body:
-        findings.append(
-            Finding(
-                module="Estilo",
-                severity="error",
-                title="Error tipográfico en ecuación de búsqueda",
-                detail='Se detectó "rectus plication"0) en metodología.',
+                title="Terminología clave presente en el documento",
+                detail=f"Términos del tema detectados: {list(term_counts.keys())[:5]}",
             )
         )
 
@@ -126,9 +107,9 @@ def audit_style(parsed: dict) -> list[Finding]:
 
     page_estimate = parsed["page_estimate"]
     body_only = parsed.get("page_estimate_body_only", page_estimate)
-    is_pdf = parsed.get("file_type") == "pdf"
-    min_target = 50 if not is_pdf else 80
-    max_target = 80 if not is_pdf else 150
+    min_target = config.effective_min_pages
+    max_target = config.effective_max_pages
+    profile_label = config.profile.label
 
     if page_estimate < min_target:
         findings.append(
@@ -137,20 +118,22 @@ def audit_style(parsed: dict) -> list[Finding]:
                 severity="warning",
                 title="Extensión por debajo del rango objetivo",
                 detail=(
-                    f"Estimación total ~{page_estimate} páginas (< {min_target}). "
+                    f"Estimación total ~{page_estimate} páginas (< {min_target} para {profile_label}). "
                     f"Cuerpo ~{body_only} páginas."
                 ),
+                why="La extensión es criterio en rúbricas UNCUyo, UCCuyo y CONEAU.",
+                how_to_fix="Amplíe marco teórico, discusión o conclusiones según indicaciones de su director.",
             )
         )
     elif page_estimate > max_target:
         findings.append(
             Finding(
                 module="Extensión",
-                severity="info" if is_pdf else "warning",
+                severity="info",
                 title="Extensión por encima del rango objetivo configurado",
                 detail=(
-                    f"Estimación total ~{page_estimate} páginas (> {max_target}). "
-                    "En tesis empíricas de maestría/doctorado esto puede ser normal."
+                    f"Estimación total ~{page_estimate} páginas (> {max_target} para {profile_label}). "
+                    "En tesis empíricas de posgrado esto puede ser normal."
                 ),
             )
         )
@@ -162,7 +145,7 @@ def audit_style(parsed: dict) -> list[Finding]:
                 title="Extensión dentro del rango esperado",
                 detail=(
                     f"Estimación total ~{page_estimate} páginas "
-                    f"(cuerpo ~{body_only})."
+                    f"(cuerpo ~{body_only}; rango {min_target}–{max_target})."
                 ),
             )
         )
