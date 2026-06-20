@@ -72,13 +72,28 @@ WEAKNESS_LABELS: dict[str, str] = {
     "Respuesta a la pregunta de investigación poco explícita": "Conclusiones poco explícitas",
     "Pregunta no respondida explícitamente en conclusiones": "Conclusiones no responden la pregunta",
     "Conclusiones no responden explícitamente la pregunta": "Conclusiones no responden la pregunta",
-    "Citas APA sin coincidencia exacta en bibliografía": "Algunas referencias no coinciden con las citas",
+    "Citas APA sin coincidencia exacta en bibliografía": "Citas APA sin coincidencia en bibliografía",
+    "DOI inválidos o no resueltos": "DOI inválidos o no resueltos",
+    "Año bibliográfico distinto al registrado en Crossref": "Años bibliográficos discordantes con Crossref",
     "Posible desajuste cita ↔ contenido del párrafo": "Algunas citas parecen mal ubicadas",
     "Referencias posiblemente ajenas al tema central": "Referencias posiblemente ajenas al tema",
     "Abundancia de párrafos breves": "Exceso de párrafos breves",
     "Introducción incompleta": "Introducción incompleta",
     "Metodología con elementos faltantes": "Metodología con lagunas",
 }
+
+BIBLIOGRAPHY_STRENGTH = "Bibliografía alineada con las citas"
+BIBLIOGRAPHY_ISSUE_HINTS = (
+    "Citas APA sin coincidencia",
+    "DOI inválidos",
+    "Año bibliográfico distinto",
+    "Referencias posiblemente ajenas",
+    "Referencias bibliográficas no citadas",
+    "Citas sin entrada bibliográfica",
+    "Posible desajuste cita",
+    "Numeración bibliográfica",
+    "Muchas referencias APA no detectadas",
+)
 
 
 def display_title(finding: Finding) -> str:
@@ -237,26 +252,66 @@ def build_warnings_list(report: AuditReport, bib_details: dict | None = None) ->
     return items
 
 
-def build_jury_assessment(report: AuditReport, warnings: list[dict]) -> dict:
+def _has_bibliography_issues(report: AuditReport, warnings: list[dict], bib_details: dict) -> bool:
+    for finding in report.findings:
+        if finding.severity not in ("error", "warning"):
+            continue
+        if finding.module == "Bibliografía":
+            return True
+        if any(hint in finding.title for hint in BIBLIOGRAPHY_ISSUE_HINTS):
+            return True
+    for warning in warnings:
+        raw = warning.get("finding_title_raw") or warning.get("title", "")
+        if any(hint in raw for hint in BIBLIOGRAPHY_ISSUE_HINTS):
+            return True
+    if bib_details.get("unmatched_count", 0) > 0:
+        return True
+    if bib_details.get("coverage") not in ("adecuada", "—", ""):
+        return True
+    if bib_details.get("doi_invalid") or bib_details.get("doi_not_resolved") or bib_details.get("doi_year_mismatch"):
+        return True
+    if bib_details.get("off_topic_count", 0) > 0 and any(
+        "ajenas al tema" in (w.get("finding_title_raw") or w.get("title", "")) for w in warnings
+    ):
+        return True
+    return False
+
+
+def _weakness_label(warning: dict) -> str:
+    raw = warning["title"].rstrip(".")
+    for key, label in WEAKNESS_LABELS.items():
+        if key in raw or raw.startswith(key[:20]):
+            return label
+    return raw
+
+
+def build_jury_assessment(
+    report: AuditReport, warnings: list[dict], bib_details: dict | None = None
+) -> dict:
+    bib_details = bib_details or {}
     strengths: list[str] = []
     weaknesses: list[str] = []
+    bib_issues = _has_bibliography_issues(report, warnings, bib_details)
 
     for finding in report.findings:
         if finding.severity == "ok" and finding.title in STRENGTH_LABELS:
             label = STRENGTH_LABELS[finding.title]
+            if label == BIBLIOGRAPHY_STRENGTH and bib_issues:
+                continue
             if label not in strengths:
                 strengths.append(label)
 
-    for warning in warnings[:5]:
-        raw = warning["title"].rstrip(".")
-        for key, label in WEAKNESS_LABELS.items():
-            if key in raw or raw.startswith(key[:20]):
-                if label not in weaknesses:
-                    weaknesses.append(label)
-                break
-        else:
-            if raw not in weaknesses:
-                weaknesses.append(raw)
+    for warning in warnings:
+        label = _weakness_label(warning)
+        if label not in weaknesses:
+            weaknesses.append(label)
+        if len(weaknesses) >= 7:
+            break
+
+    if bib_issues and BIBLIOGRAPHY_STRENGTH not in weaknesses:
+        bib_weaknesses = [w for w in weaknesses if any(h in w.lower() for h in ("cita", "bibliograf", "doi", "referencia"))]
+        if not bib_weaknesses:
+            weaknesses.insert(0, "Bibliografía con observaciones (citas, DOI o pertinencia)")
 
     if not strengths:
         strengths = ["Estructura general del trabajo reconocible"]
@@ -358,7 +413,7 @@ def build_dashboard(report: AuditReport, parsed: dict, extras: dict) -> dict:
     emoji = readiness_emoji(readiness)
     status_label = readiness
     main_reason = build_main_reason(prioritized, chapter_reviews)
-    jury = build_jury_assessment(report, warnings_list)
+    jury = build_jury_assessment(report, warnings_list, bib_details)
     interpretation = icao_interpretation(report.score)
 
     config = extras.get("config")

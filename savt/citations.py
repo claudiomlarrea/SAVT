@@ -136,8 +136,7 @@ def _audit_apa_citations(parsed: dict, keywords: list[str]) -> list[Finding]:
     bib_keys = {ref.key for ref in bibliography.values() if ref.key}
 
     missing_in_bib = sorted(key for key in cited_keys if not apa_keys_match(key, bib_keys))
-    if missing_in_bib:
-        pass  # Detalle completo en bibliography_analysis.py
+    # Detalle de citas sin match en bibliography_analysis.py; no marcar «ok» si hay faltantes.
 
     uncited = sorted(key for key in bib_keys if not any(apa_keys_match(key, {cited}) for cited in cited_keys))
     if uncited and len(uncited) > len(bib_keys) * 0.35:
@@ -153,7 +152,7 @@ def _audit_apa_citations(parsed: dict, keywords: list[str]) -> list[Finding]:
                 evidence=", ".join(uncited[:12]),
             )
         )
-    elif bib_keys and cited_keys:
+    elif bib_keys and cited_keys and not missing_in_bib:
         coverage = sum(1 for key in cited_keys if apa_keys_match(key, bib_keys)) / max(len(cited_keys), 1)
         findings.append(
             Finding(
