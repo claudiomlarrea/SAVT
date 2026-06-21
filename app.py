@@ -584,6 +584,19 @@ def render_academic_depth(dashboard: dict) -> None:
             )
         st.dataframe(rows, use_container_width=True, hide_index=True)
 
+        notes = [
+            item
+            for item in section_depth
+            if item.get("depth_reason") and item.get("depth_status") in {"partial", "weak"}
+        ]
+        if notes:
+            st.markdown("**Por qué no es plenamente conforme**")
+            for item in notes:
+                st.caption(
+                    f"**{item.get('title', '—')}** ({item.get('depth_label', '—')}): "
+                    f"{item.get('depth_reason', '')}"
+                )
+
     st.markdown("**Indicadores transversales**")
     if content.get("hypothesis_detected"):
         st.markdown(

@@ -306,12 +306,14 @@ def build_report_docx(report: AuditReport, dashboard: dict) -> bytes:
             if item.get("result_markers"):
                 result_part = f", ind. hallazgos {item['result_markers']}"
             detected = item.get("detected_as", "—")
+            reason = item.get("depth_reason", "")
+            reason_part = f" — {reason}" if reason else ""
             _add_bullet(
                 doc,
                 f"{item.get('title', '—')} [{detected}]: {item.get('words', 0)} palabras, "
                 f"{item.get('citation_count', 0)} citas, "
                 f"{item.get('critical_markers', 0)} marcadores críticos{result_part} "
-                f"— {item.get('depth_label', '—')}",
+                f"— {item.get('depth_label', '—')}{reason_part}",
             )
     _add_label_paragraph(doc, "Índice proxy originalidad", f"{orig.get('score_proxy', 0)}/100")
 

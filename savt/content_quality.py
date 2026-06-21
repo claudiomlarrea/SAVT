@@ -91,6 +91,54 @@ def _section_metrics(text: str) -> dict:
     }
 
 
+def _failed_depth_checks(role: str, metrics: dict) -> list[str]:
+    """Indicadores no alcanzados, en lenguaje breve para el usuario."""
+    rules = ROLE_DEPTH_RULES.get(role, {"min_words": 100})
+    words = metrics["words"]
+    if words <= 0:
+        return ["apartado no detectado"]
+
+    failed: list[str] = []
+    min_words = rules.get("min_words", 100)
+    if words < min_words:
+        failed.append(f"extensión breve ({words} palabras; mínimo ~{min_words})")
+
+    if "min_density" in rules:
+        min_cites = int(rules["min_density"] * words / 100)
+        if metrics["citation_count"] < min_cites:
+            cites = metrics["citation_count"]
+            if cites == 0:
+                failed.append("sin citas bibliográficas detectadas")
+            else:
+                failed.append(
+                    f"pocas citas para la extensión ({cites}; se esperaban ≥{max(min_cites, 1)})"
+                )
+
+    if "min_critical" in rules and metrics["critical_markers"] < rules["min_critical"]:
+        failed.append(
+            f"pocos marcadores de análisis crítico ({metrics['critical_markers']}; "
+            f"mínimo {rules['min_critical']})"
+        )
+
+    if "min_result_markers" in rules and metrics["result_markers"] < rules["min_result_markers"]:
+        failed.append("pocos indicadores de presentación de hallazgos")
+
+    return failed
+
+
+def _depth_reason(role: str, metrics: dict, status: str) -> str:
+    if status in {"adequate", "missing"}:
+        return ""
+    failed = _failed_depth_checks(role, metrics)
+    if status == "partial" and failed:
+        return f"{failed[0].capitalize()}."
+    if status == "weak":
+        if failed:
+            return f"{'; '.join(failed[:2]).capitalize()}."
+        return "No alcanza los umbrales mínimos del apartado."
+    return ""
+
+
 def _assess_section_depth(role: str, metrics: dict) -> str:
     rules = ROLE_DEPTH_RULES.get(role, {"min_words": 100})
     words = metrics["words"]
@@ -163,6 +211,7 @@ def build_section_depth_analysis(parsed: dict) -> list[dict]:
             "result_markers": metrics["result_markers"],
             "depth_status": depth_status,
             "depth_label": DEPTH_STATUS_LABELS[depth_status],
+            "depth_reason": _depth_reason(role, metrics, depth_status),
         }
         rows.append(row)
 
