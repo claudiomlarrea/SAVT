@@ -532,6 +532,79 @@ def _first_match_start_any(body: str, patterns: list[str], *, ignore_case: bool 
 
 # Encabezado de sección: inicio de línea y título seguido de salto, fin o numeración.
 _PARTE = r"(?:^|\n)\s*(?:PRIMERA|SEGUNDA|TERCERA|CUARTA|QUINTA|SEXTA)\s+PARTE\s*[-–—]?\s*"
+_MARCO_HEADING = (
+    r"(?im)(?:^|\n)\s*MARCO TE[OÓ]RICO(?:\s*[-–—]?\s*CONCEPTUAL)?\b"
+)
+
+
+def _strip_leading_toc(body: str) -> str:
+    """
+    Omite índice o tabla de contenidos duplicada al inicio del PDF.
+    Típico cuando los encabezados aparecen dos veces: primero como índice y luego como cuerpo.
+    """
+    if not body.strip():
+        return body
+
+    intro_hits = [m.start() for m in re.finditer(r"(?im)(?:^|\n)\s*INTRODUCCI[ÓO]N\b", body)]
+    metod_hits = [
+        m.start()
+        for m in re.finditer(r"(?im)(?:^|\n)\s*METODOLOG[IÍ]A\s", body)
+    ]
+
+    if len(intro_hits) >= 2 and metod_hits:
+        toc_words = _word_count(body[intro_hits[0] : metod_hits[0]])
+        if toc_words < 800:
+            if len(metod_hits) >= 2 and metod_hits[0] < len(body) * 0.05:
+                real_metod = metod_hits[-1]
+                intros_before = [pos for pos in intro_hits if pos < real_metod]
+                if intros_before:
+                    return body[intros_before[-1] :].lstrip()
+            return body[intro_hits[1] :].lstrip()
+
+    if len(metod_hits) >= 2 and metod_hits[0] < len(body) * 0.05:
+        if _word_count(body[: metod_hits[0]]) < 800:
+            intros_before = [pos for pos in intro_hits if pos < metod_hits[-1]]
+            if intros_before:
+                return body[intros_before[-1] :].lstrip()
+
+    return body
+
+
+def _all_pattern_starts(body: str, patterns: list[str], *, ignore_case: bool = True) -> list[int]:
+    flags = re.MULTILINE | (re.IGNORECASE if ignore_case else 0)
+    starts: list[int] = []
+    for pattern in patterns:
+        for match in re.finditer(pattern, body, flags):
+            starts.append(match.start())
+    return sorted(set(starts))
+
+
+def _pick_substantive_heading(
+    body: str,
+    patterns: list[str],
+    *,
+    ignore_case: bool = True,
+    min_segment_words: int = 350,
+) -> int | None:
+    """Elige el encabezado cuya sección siguiente tiene más contenido (evita entradas de índice)."""
+    starts = _all_pattern_starts(body, patterns, ignore_case=ignore_case)
+    if not starts:
+        return None
+    if len(starts) == 1:
+        return starts[0]
+
+    best_pos = starts[0]
+    best_words = 0
+    for idx, pos in enumerate(starts):
+        next_pos = starts[idx + 1] if idx + 1 < len(starts) else min(len(body), pos + 25000)
+        segment_words = _word_count(body[pos:next_pos])
+        if segment_words > best_words:
+            best_words = segment_words
+            best_pos = pos
+
+    if best_words >= min_segment_words:
+        return best_pos
+    return _first_match_in_order(body, patterns, ignore_case=ignore_case)
 
 
 def _find_objetivos_start(body: str) -> tuple[int | None, str]:
@@ -552,6 +625,14 @@ def _find_objetivos_start(body: str) -> tuple[int | None, str]:
             r"(?im)(?:^|\n)\s*\d+\.?\s*Objetivo general",
             "Objetivos",
         ),
+        (
+            r"(?im)(?:^|\n)\s*Objetivo general\b",
+            "Objetivos",
+        ),
+        (
+            r"(?im)(?:^|\n)\s*Objetivos espec[ií]ficos\b",
+            "Objetivos específicos",
+        ),
     ]
     for pattern, title in patterns_titles:
         pos = _first_match_start(body, pattern)
@@ -560,7 +641,11 @@ def _find_objetivos_start(body: str) -> tuple[int | None, str]:
     return None, ""
 
 
-def _find_major_section_boundaries(body: str) -> list[tuple[int, str, str]]:
+def _find_major_section_boundaries(
+    body: str,
+    *,
+    pos_objetivos: int | None = None,
+) -> list[tuple[int, str, str]]:
     """Localiza encabezados principales; prioriza estructura por PARTES y evita falsos positivos."""
     role_patterns: list[tuple[str, str, list[str], bool]] = [
         (
@@ -578,6 +663,7 @@ def _find_major_section_boundaries(body: str) -> list[tuple[int, str, str]]:
             "Marco teórico",
             [
                 rf"(?im){_PARTE}ENCUADRE TE[OÓ]RICO",
+                _MARCO_HEADING + r"(?=\s|\n|$)",
                 r"(?m)(?:^|\n)\s*ENCUADRE TE[OÓ]RICO\s*(?:\n|$|\d+\.)",
                 r"(?m)(?:^|\n)\s*MARCO TE[OÓ]RICO\s*(?:\n|$|\d+\.)",
                 r"(?m)(?:^|\n)\s*MARCO CONCEPTUAL\s*(?:\n|$|\d+\.)",
@@ -593,7 +679,8 @@ def _find_major_section_boundaries(body: str) -> list[tuple[int, str, str]]:
             [
                 rf"(?im){_PARTE}DECISIONES EMP",
                 rf"(?im){_PARTE}METODOL",
-                r"(?m)(?:^|\n)\s*METODOLOG[IÍ]A\s*(?:\n|$|\d+\.)",
+                r"(?im)(?:^|\n)\s*METODOLOG[IÍ]A\s",
+                r"(?im)(?:^|\n)\s*METODOLOG[IÍ]A\s*(?:\n|$|\d+\.)",
                 r"(?m)(?:^|\n)\s*MATERIALES Y M[EÉ]TODOS\s*(?:\n|$|\d+\.)",
                 r"(?m)(?:^|\n)\s*DISE[ÑN]O METODOL[ÓO]GICO\s*(?:\n|$|\d+\.)",
                 r"(?m)(?:^|\n)\s*METODOLOG[IÍ]A\b(?=\s+[A-ZÁÉÍÓÚÑ])",
@@ -606,6 +693,7 @@ def _find_major_section_boundaries(body: str) -> list[tuple[int, str, str]]:
             [
                 rf"(?im){_PARTE}AN[ÁA]LISIS Y RESULTADOS",
                 rf"(?im){_PARTE}RESULTADOS",
+                r"(?m)(?:^|\n)\s*Resultados\s",
                 r"(?m)(?:^|\n)\s*RESULTADOS(?:\s+Y\s+DISCUSI[ÓO]N)?\s*(?:\n|$|\d+\.)",
                 r"(?m)(?:^|\n)\s*AN[ÁA]LISIS(?:\s+DE\s+)?RESULTADOS\s*(?:\n|$|\d+\.)",
                 r"(?m)(?:^|\n)\s*RESULTADOS\b(?=\s+[A-ZÁÉÍÓÚÑ])",
@@ -637,7 +725,26 @@ def _find_major_section_boundaries(body: str) -> list[tuple[int, str, str]]:
 
     boundaries: list[tuple[int, str, str]] = []
     for role, default_title, patterns, ignore_case in role_patterns:
-        pos = _first_match_in_order(body, patterns, ignore_case=ignore_case)
+        if role == "marco_teorico" and pos_objetivos is not None:
+            starts = [
+                p for p in _all_pattern_starts(body, patterns, ignore_case=ignore_case) if p >= pos_objetivos
+            ]
+            if starts:
+                best_pos = starts[0]
+                best_words = 0
+                for idx, pos_candidate in enumerate(starts):
+                    next_pos = starts[idx + 1] if idx + 1 < len(starts) else len(body)
+                    segment_words = _word_count(body[pos_candidate:next_pos])
+                    if segment_words > best_words:
+                        best_words = segment_words
+                        best_pos = pos_candidate
+                pos = best_pos if best_words >= 350 else starts[0]
+            else:
+                pos = _pick_substantive_heading(body, patterns, ignore_case=ignore_case)
+        elif role == "resultados":
+            pos = _first_match_in_order(body, patterns, ignore_case=ignore_case)
+        else:
+            pos = _pick_substantive_heading(body, patterns, ignore_case=ignore_case)
         if pos is not None:
             boundaries.append((pos, role, default_title))
 
@@ -660,8 +767,10 @@ def build_non_overlapping_word_partition(body: str) -> tuple[dict[str, str], dic
     if not body.strip():
         return {}, {}
 
+    body = _strip_leading_toc(body)
+
     pos_obj_start, obj_title = _find_objetivos_start(body)
-    major = _find_major_section_boundaries(body)
+    major = _find_major_section_boundaries(body, pos_objetivos=pos_obj_start)
 
     first_major = major[0][0] if major else len(body)
     obj_end = first_major
