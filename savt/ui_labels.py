@@ -2,6 +2,12 @@
 
 from __future__ import annotations
 
+CONFORMANCE_COLORS = {
+    "Conforme": "#15803d",
+    "Parcialmente conforme": "#ca8a04",
+    "No conforme": "#b91c1c",
+}
+
 
 def conformance_label(ok: bool, partial: bool = False) -> str:
     if ok:
@@ -19,3 +25,18 @@ def readiness_conformance_label(status: str) -> str:
         "No apta para presentar": "No conforme",
         "No apta para presentación": "No conforme",
     }.get(status, "Parcialmente conforme")
+
+
+def conformance_badge(ok: bool, partial: bool = False) -> str:
+    return conformance_badge_from_label(conformance_label(ok, partial))
+
+
+def conformance_badge_from_label(label: str) -> str:
+    color = CONFORMANCE_COLORS.get(label, CONFORMANCE_COLORS["Parcialmente conforme"])
+    return (
+        f'<span style="color:{color};font-weight:700;">{label}</span>'
+    )
+
+
+def readiness_conformance_badge(status: str) -> str:
+    return conformance_badge_from_label(readiness_conformance_label(status))

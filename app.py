@@ -13,7 +13,7 @@ from savt.institutional_profiles import PROFILES, profile_options
 from savt.report_builder import findings_dataframe_rows
 from savt.taxonomy import AUDIT_AREAS, SEVERITY_LABELS
 from savt.ui_branding import LOGO_PATH, inject_branding
-from savt.ui_labels import conformance_label
+from savt.ui_labels import conformance_badge, readiness_conformance_badge
 
 st.set_page_config(
     page_title="SAVT — Auditoría de Tesis",
@@ -177,7 +177,10 @@ def render_verdict(dashboard: dict) -> None:
 
     with right:
         st.markdown("### Estado general")
-        st.markdown(f"## {dashboard['presentation_emoji']}")
+        st.markdown(
+            f"## {readiness_conformance_badge(dashboard['readiness'])}",
+            unsafe_allow_html=True,
+        )
         st.markdown(f"**{dashboard['readiness']}**")
         st.markdown(f"**Motivo principal:** {dashboard['main_reason']}")
 
@@ -190,14 +193,12 @@ def render_checklist(dashboard: dict) -> None:
     st.markdown(f"**Estado:** {checklist['status']}")
 
     for item in checklist["items"]:
-        if item["ok"]:
-            mark = "Conforme"
-        elif item.get("partial"):
-            mark = "Parcialmente conforme"
-        else:
-            mark = "No conforme"
-
-        st.markdown(f"**{mark}** — {item['label']}")
+        ok = item["ok"]
+        partial = item.get("partial", False)
+        st.markdown(
+            f"{conformance_badge(ok, partial)} — {item['label']}",
+            unsafe_allow_html=True,
+        )
 
         if not item["ok"] or item.get("partial"):
             with st.expander(f"Qué revisar en {item['label'].split(' — ')[0]}", expanded=False):
@@ -286,13 +287,12 @@ def render_structure(dashboard: dict) -> None:
     if chapter_reviews:
         st.markdown("## Revisión por capítulos")
         for review in chapter_reviews:
-            if review["ok"]:
-                mark = "Conforme"
-            elif review.get("partial"):
-                mark = "Parcialmente conforme"
-            else:
-                mark = "No conforme"
-            st.markdown(f"### {mark} — {review['title']}")
+            ok = review["ok"]
+            partial = review.get("partial", False)
+            st.markdown(
+                f"<h3>{conformance_badge(ok, partial)} — {review['title']}</h3>",
+                unsafe_allow_html=True,
+            )
             if review["ok"]:
                 st.caption(review.get("summary", "Apartado conforme."))
                 continue
@@ -334,13 +334,20 @@ def render_structure(dashboard: dict) -> None:
         checks = {c["label"]: c for c in block.get("checks", [])}
         st.markdown(f"**{title}**")
         if not checks:
-            st.markdown(f"- **{conformance_label(block.get('present', False))}** — {'Presente' if block.get('present') else 'No detectada claramente'}")
+            st.markdown(
+                f"- {conformance_badge(block.get('present', False))} — "
+                f"{'Presente' if block.get('present') else 'No detectada claramente'}",
+                unsafe_allow_html=True,
+            )
             continue
         st.markdown("*Tiene:*")
         for label in labels:
             check = checks.get(label, {})
             partial = check.get("partial", False)
-            st.markdown(f"- **{conformance_label(check.get('ok', False), partial)}** — {label}")
+            st.markdown(
+                f"- {conformance_badge(check.get('ok', False), partial)} — {label}",
+                unsafe_allow_html=True,
+            )
         st.markdown("")
 
 
@@ -352,7 +359,10 @@ def render_research_question(dashboard: dict) -> None:
     st.markdown(f"**Pregunta detectada:** {block['question']}")
     st.markdown("**Evaluación:**")
     for check in block.get("checks", []):
-        st.markdown(f"- **{conformance_label(check['ok'], check.get('partial', False))}** — {check['label']}")
+        st.markdown(
+            f"- {conformance_badge(check['ok'], check.get('partial', False))} — {check['label']}",
+            unsafe_allow_html=True,
+        )
 
 
 def render_objectives(dashboard: dict) -> None:
@@ -368,7 +378,11 @@ def render_objectives(dashboard: dict) -> None:
             "parcialmente respondido": "Parcialmente respondido",
             "sin evidencia clara": "Sin evidencia clara",
         }.get(item["status"], item["status"].capitalize())
-        st.markdown(f"**Objetivo específico {item['number']}** — **{conformance_label(responded, partial)}** — {label}")
+        st.markdown(
+            f"**Objetivo específico {item['number']}** — "
+            f"{conformance_badge(responded, partial)} — {label}",
+            unsafe_allow_html=True,
+        )
         st.caption(item["text"][:240] + ("…" if len(item["text"]) > 240 else ""))
 
 
@@ -378,32 +392,32 @@ def render_bibliography(dashboard: dict) -> None:
     st.markdown("## Bibliografía y citación")
 
     summary_lines = [
-        f"**{conformance_label(True)}** — Estilo {bib['style']} detectado",
-        f"**{conformance_label(True)}** — {bib['total_refs']} referencias",
-        f"**{conformance_label(True)}** — {bib['citations_found']} citas encontradas",
+        f"{conformance_badge(True)} — Estilo {bib['style']} detectado",
+        f"{conformance_badge(True)} — {bib['total_refs']} referencias",
+        f"{conformance_badge(True)} — {bib['citations_found']} citas encontradas",
     ]
     if bib["unmatched_citations"]:
         summary_lines.append(
-            f"**{conformance_label(False, True)}** — {bib['unmatched_citations']} citas no emparejadas"
+            f"{conformance_badge(False, True)} — {bib['unmatched_citations']} citas no emparejadas"
         )
     else:
-        summary_lines.append(f"**{conformance_label(True)}** — Citas emparejadas con bibliografía")
+        summary_lines.append(f"{conformance_badge(True)} — Citas emparejadas con bibliografía")
     if bib["out_of_period"]:
         summary_lines.append(
-            f"**{conformance_label(False, True)}** — {bib['out_of_period']} referencias fuera del período metodológico"
+            f"{conformance_badge(False, True)} — {bib['out_of_period']} referencias fuera del período metodológico"
         )
     if bib["possibly_off_topic"]:
         summary_lines.append(
-            f"**{conformance_label(False, True)}** — "
+            f"{conformance_badge(False, True)} — "
             f"{bib['possibly_off_topic']} referencias podrían no estar relacionadas con el tema"
         )
     coverage_ok = bib["coverage"] == "adecuada"
     summary_lines.append(
-        f"**{conformance_label(coverage_ok, not coverage_ok and bib['coverage'] != '—')}** — "
+        f"{conformance_badge(coverage_ok, not coverage_ok and bib['coverage'] != '—')} — "
         f"Cobertura bibliográfica {bib['coverage']}"
     )
     for line in summary_lines:
-        st.markdown(line)
+        st.markdown(line, unsafe_allow_html=True)
 
     unmatched = details.get("unmatched_apa") or []
     if unmatched:
@@ -475,30 +489,32 @@ def render_figures_tables(dashboard: dict) -> None:
     for fig in figures:
         st.markdown(f"**Figura {fig['number']}**")
         parts = []
-        if not fig["has_number"]:
-            parts.append("No conforme — Sin número claro")
-        else:
-            parts.append("Conforme — Tiene número")
-        parts.append(f"{conformance_label(fig['has_title'])} — Tiene título")
         parts.append(
-            f"{conformance_label(fig['cited_in_text'], not fig['cited_in_text'])} — "
+            f"{conformance_badge(fig['has_number'])} — "
+            f"{'Tiene número' if fig['has_number'] else 'Sin número claro'}"
+        )
+        parts.append(f"{conformance_badge(fig['has_title'])} — Tiene título")
+        parts.append(
+            f"{conformance_badge(fig['cited_in_text'], not fig['cited_in_text'])} — "
             f"{'Citada en el texto' if fig['cited_in_text'] else 'No se menciona en el texto'}"
         )
-        parts.append(f"{conformance_label(fig['has_source'], not fig['has_source'])} — Fuente indicada")
-        st.markdown(" · ".join(parts))
+        parts.append(
+            f"{conformance_badge(fig['has_source'], not fig['has_source'])} — Fuente indicada"
+        )
+        st.markdown(" · ".join(parts), unsafe_allow_html=True)
         st.caption(fig["title"][:180])
 
     for tab in tables:
         st.markdown(f"**Tabla {tab['number']}**")
         parts = []
-        parts.append(f"{conformance_label(tab['has_number'])} — Numeración")
-        parts.append(f"{conformance_label(tab['has_title'])} — Título")
-        parts.append(f"{conformance_label(tab['has_source'])} — Fuente")
+        parts.append(f"{conformance_badge(tab['has_number'])} — Numeración")
+        parts.append(f"{conformance_badge(tab['has_title'])} — Título")
+        parts.append(f"{conformance_badge(tab['has_source'])} — Fuente")
         parts.append(
-            f"{conformance_label(tab['cited_in_text'], not tab['cited_in_text'])} — "
+            f"{conformance_badge(tab['cited_in_text'], not tab['cited_in_text'])} — "
             f"{'Mención en texto' if tab['cited_in_text'] else 'Sin mención en texto'}"
         )
-        st.markdown(" · ".join(parts))
+        st.markdown(" · ".join(parts), unsafe_allow_html=True)
         st.caption(tab["title"][:180])
 
 
@@ -518,7 +534,10 @@ def render_formal(dashboard: dict) -> None:
     for label, ok in items:
         if ok is None:
             continue
-        st.markdown(f"**{conformance_label(bool(ok), ok is False)}** — {label}")
+        st.markdown(
+            f"{conformance_badge(bool(ok), ok is False)} — {label}",
+            unsafe_allow_html=True,
+        )
 
     abstract_words = formal.get("abstract_words", 0)
     if abstract_words:
@@ -565,8 +584,10 @@ def render_ethics(dashboard: dict) -> None:
 
     checklist = ethics.get("checklist") or []
     for item in checklist:
-        mark = conformance_label(bool(item.get("found")))
-        st.markdown(f"**{mark}** — {item.get('label', '')}")
+        st.markdown(
+            f"{conformance_badge(bool(item.get('found')))} — {item.get('label', '')}",
+            unsafe_allow_html=True,
+        )
 
     found = ethics.get("found_count", 0)
     total = ethics.get("total", 0)
@@ -634,13 +655,17 @@ def render_academic_depth(dashboard: dict) -> None:
         st.caption(help_text.get("critical_markers_found", ""))
 
     if content.get("hypothesis_detected"):
-        st.markdown(f"**{conformance_label(True)}** — Hipótesis detectada")
+        st.markdown(
+            f"{conformance_badge(True)} — Hipótesis detectada",
+            unsafe_allow_html=True,
+        )
     results = content.get("results_development")
     if results and results != "unknown":
         adequate = results == "adequate"
         label = "adecuada" if adequate else "requiere refuerzo"
         st.markdown(
-            f"**{conformance_label(adequate, not adequate)}** — Desarrollo de resultados: {label}"
+            f"{conformance_badge(adequate, not adequate)} — Desarrollo de resultados: {label}",
+            unsafe_allow_html=True,
         )
 
 
