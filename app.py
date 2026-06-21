@@ -280,110 +280,40 @@ def render_jury(dashboard: dict) -> None:
         st.markdown(f"## {jury['approval_probability']}")
 
 
-def render_structure(dashboard: dict) -> None:
+def render_apartados_con_observaciones(dashboard: dict) -> None:
     from savt.chapter_reviews import CHECK_LABELS
 
     chapter_reviews = dashboard.get("chapter_reviews") or []
-    if chapter_reviews:
-        st.markdown("## Revisión por capítulos")
-        for review in chapter_reviews:
-            ok = review["ok"]
-            partial = review.get("partial", False)
-            st.markdown(
-                f"<h3>{conformance_badge(ok, partial)} — {review['title']}</h3>",
-                unsafe_allow_html=True,
-            )
-            if review["ok"]:
-                st.caption(review.get("summary", "Apartado conforme."))
-                continue
-            st.write(review.get("summary", ""))
-            missing = review.get("missing", []) + review.get("partial_items", [])
-            if missing:
-                st.markdown("**Qué falta o no está claro:**")
-                for label in missing:
-                    st.markdown(f"- {CHECK_LABELS.get(label, label)}")
-            if review.get("why"):
-                st.markdown(f"**Por qué importa:** {review['why']}")
-            if review.get("how_to_fix"):
-                st.info(f"**Cómo corregir:** {review['how_to_fix']}")
-            st.markdown("")
+    pending = [review for review in chapter_reviews if not review.get("ok")]
+
+    st.markdown("## Apartados con observaciones")
+    st.caption(
+        "Orientación detallada solo para apartados parcialmente conformes o no conformes. "
+        "Los apartados conformes no se listan aquí."
+    )
+
+    if not pending:
+        st.success("Todos los apartados evaluados cumplen los criterios detectados automáticamente.")
         return
 
-    structure = dashboard["structure"]
-    st.markdown("## Estructura del documento")
-
-    sections = [
-        ("Introducción", "introduccion", ["problema", "justificación", "pregunta", "objetivos"]),
-        ("Marco teórico", "marco_teorico", ["marco presente", "marco desarrollado", "marco vinculado"]),
-        ("Metodología", "metodologia", ["diseño", "población", "muestra", "variables", "limitaciones"]),
-        ("Resultados", "resultados", ["resultados presente", "resultados desarrollo"]),
-        ("Discusión", "discusion", [
-            "discusion presente",
-            "discusion desarrollo",
-            "interpretación",
-            "confronta literatura",
-            "vincula objetivos",
-            "limitaciones discusion",
-            "implicaciones",
-        ]),
-        ("Conclusiones", "conclusiones", ["responde objetivos", "responde la pregunta"]),
-    ]
-
-    for title, key, labels in sections:
-        block = structure.get(key, {})
-        checks = {c["label"]: c for c in block.get("checks", [])}
-        st.markdown(f"**{title}**")
-        if not checks:
-            st.markdown(
-                f"- {conformance_badge(block.get('present', False))} — "
-                f"{'Presente' if block.get('present') else 'No detectada claramente'}",
-                unsafe_allow_html=True,
-            )
-            continue
-        st.markdown("*Tiene:*")
-        for label in labels:
-            check = checks.get(label, {})
-            partial = check.get("partial", False)
-            st.markdown(
-                f"- {conformance_badge(check.get('ok', False), partial)} — {label}",
-                unsafe_allow_html=True,
-            )
+    for review in pending:
+        partial = review.get("partial", False)
+        st.markdown(
+            f"<h3>{conformance_badge(False, partial)} — {review['title']}</h3>",
+            unsafe_allow_html=True,
+        )
+        if review.get("summary"):
+            st.write(review["summary"])
+        missing = (review.get("missing") or []) + (review.get("partial_items") or [])
+        if missing:
+            st.markdown("**Qué falta o no está claro:**")
+            for label in missing:
+                st.markdown(f"- {CHECK_LABELS.get(label, label)}")
+        if review.get("why"):
+            st.markdown(f"**Por qué importa:** {review['why']}")
+        if review.get("how_to_fix"):
+            st.info(f"**Cómo corregir:** {review['how_to_fix']}")
         st.markdown("")
-
-
-def render_research_question(dashboard: dict) -> None:
-    block = dashboard.get("research_question", {})
-    if not block.get("question"):
-        return
-    st.markdown("## Pregunta de investigación")
-    st.markdown(f"**Pregunta detectada:** {block['question']}")
-    st.markdown("**Evaluación:**")
-    for check in block.get("checks", []):
-        st.markdown(
-            f"- {conformance_badge(check['ok'], check.get('partial', False))} — {check['label']}",
-            unsafe_allow_html=True,
-        )
-
-
-def render_objectives(dashboard: dict) -> None:
-    evaluations = dashboard.get("objectives_evaluation") or []
-    if not evaluations:
-        return
-    st.markdown("## Coherencia objetivos → resultados → conclusiones")
-    for item in evaluations:
-        responded = item["status"] == "respondido"
-        partial = item["status"] == "parcialmente respondido"
-        label = {
-            "respondido": "Respondido",
-            "parcialmente respondido": "Parcialmente respondido",
-            "sin evidencia clara": "Sin evidencia clara",
-        }.get(item["status"], item["status"].capitalize())
-        st.markdown(
-            f"**Objetivo específico {item['number']}** — "
-            f"{conformance_badge(responded, partial)} — {label}",
-            unsafe_allow_html=True,
-        )
-        st.caption(item["text"][:240] + ("…" if len(item["text"]) > 240 else ""))
 
 
 def render_bibliography(dashboard: dict) -> None:
@@ -774,12 +704,6 @@ def render_bibliography_and_citation(dashboard: dict) -> None:
     render_figures_tables(dashboard)
 
 
-def render_chapter_review(dashboard: dict) -> None:
-    render_structure(dashboard)
-    render_research_question(dashboard)
-    render_objectives(dashboard)
-
-
 def render_hallazgos(dashboard: dict) -> None:
     warnings = dashboard.get("warnings_list") or []
     st.markdown(f"## Hallazgos y advertencias ({len(warnings)})")
@@ -864,7 +788,7 @@ def main() -> None:
     st.divider()
     render_checklist(dashboard)
     st.divider()
-    render_chapter_review(dashboard)
+    render_apartados_con_observaciones(dashboard)
     st.divider()
     render_bibliography_and_citation(dashboard)
     st.divider()

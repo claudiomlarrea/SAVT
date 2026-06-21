@@ -296,14 +296,19 @@ def build_report_docx(report: AuditReport, dashboard: dict) -> bytes:
     _add_label_paragraph(doc, "Densidad de citas marco", str(content.get("citation_density_marco", 0)))
     _add_label_paragraph(doc, "Índice proxy originalidad", f"{orig.get('score_proxy', 0)}/100")
 
-    _add_heading(doc, "9. Revisión por capítulos", 1)
-    for review in dashboard.get("chapter_reviews") or []:
-        status = "Conforme" if review.get("ok") else "Requiere revisión"
+    _add_heading(doc, "9. Apartados con observaciones", 1)
+    pending_reviews = [r for r in dashboard.get("chapter_reviews") or [] if not r.get("ok")]
+    if not pending_reviews:
+        doc.add_paragraph(
+            "Todos los apartados evaluados cumplen los criterios detectados automáticamente."
+        )
+    for review in pending_reviews:
+        status = "Parcialmente conforme" if review.get("partial") else "No conforme"
         _add_heading(doc, f"{review['title']} — {status}", 2)
         doc.add_paragraph(review.get("summary", ""))
         missing = (review.get("missing") or []) + (review.get("partial_items") or [])
         if missing:
-            doc.add_paragraph("Elementos a reforzar:")
+            doc.add_paragraph("Qué falta o no está claro:")
             for label in missing:
                 _add_bullet(doc, CHECK_LABELS.get(label, label))
         if review.get("why"):
