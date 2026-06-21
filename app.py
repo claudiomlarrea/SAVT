@@ -570,6 +570,8 @@ def render_academic_depth(dashboard: dict) -> None:
     if section_depth:
         rows = []
         for item in section_depth:
+            if item.get("depth_status") == "missing" and item.get("words", 0) <= 0:
+                continue
             result_markers = item.get("result_markers", 0)
             rows.append(
                 {

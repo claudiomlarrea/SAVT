@@ -506,9 +506,150 @@ def build_enriched_section_map(
     return merged, meta
 
 
-def _first_match_start(body: str, pattern: str) -> int | None:
-    match = re.search(pattern, body, re.IGNORECASE | re.MULTILINE)
+def _first_match_start(body: str, pattern: str, *, ignore_case: bool = True) -> int | None:
+    flags = re.MULTILINE | (re.IGNORECASE if ignore_case else 0)
+    match = re.search(pattern, body, flags)
     return match.start() if match else None
+
+
+def _first_match_in_order(body: str, patterns: list[str], *, ignore_case: bool = True) -> int | None:
+    """Devuelve la primera coincidencia según prioridad de patrones (no la más temprana en el texto)."""
+    for pattern in patterns:
+        pos = _first_match_start(body, pattern, ignore_case=ignore_case)
+        if pos is not None:
+            return pos
+    return None
+
+
+def _first_match_start_any(body: str, patterns: list[str], *, ignore_case: bool = True) -> int | None:
+    best: int | None = None
+    for pattern in patterns:
+        pos = _first_match_start(body, pattern, ignore_case=ignore_case)
+        if pos is not None and (best is None or pos < best):
+            best = pos
+    return best
+
+
+# Encabezado de sección: inicio de línea y título seguido de salto, fin o numeración.
+_PARTE = r"(?:^|\n)\s*(?:PRIMERA|SEGUNDA|TERCERA|CUARTA|QUINTA|SEXTA)\s+PARTE\s*[-–—]?\s*"
+
+
+def _find_objetivos_start(body: str) -> tuple[int | None, str]:
+    patterns_titles = [
+        (
+            r"(?im)(?:^|\n)\s*Objetivos y pregunta de investigaci",
+            "Objetivos y pregunta de investigación",
+        ),
+        (
+            r"(?im)(?:^|\n)\s*PREGUNTA DE INVESTIGACI[ÓO]N,\s*OBJETIVOS E HIP[ÓO]TESIS",
+            "Pregunta de investigación, objetivos e hipótesis",
+        ),
+        (
+            r"(?im)(?:^|\n)\s*\d+\.?\s*Pregunta de investigaci",
+            "Pregunta de investigación",
+        ),
+        (
+            r"(?im)(?:^|\n)\s*\d+\.?\s*Objetivo general",
+            "Objetivos",
+        ),
+    ]
+    for pattern, title in patterns_titles:
+        pos = _first_match_start(body, pattern)
+        if pos is not None:
+            return pos, title
+    return None, ""
+
+
+def _find_major_section_boundaries(body: str) -> list[tuple[int, str, str]]:
+    """Localiza encabezados principales; prioriza estructura por PARTES y evita falsos positivos."""
+    role_patterns: list[tuple[str, str, list[str], bool]] = [
+        (
+            "analisis_bibliometrico",
+            "Análisis bibliométrico",
+            [
+                rf"(?im){_PARTE}AN[ÁA]LISIS BIBLIOM[EÉ]TRICO",
+                r"(?m)(?:^|\n)\s*AN[ÁA]LISIS BIBLIOM[EÉ]TRICO\s*(?:\n|$|\d+\.)",
+                r"(?m)(?:^|\n)\s*AN[ÁA]LISIS BIBLIOM[EÉ]TRICO\b(?=\s+[A-ZÁÉÍÓÚÑ])",
+            ],
+            False,
+        ),
+        (
+            "marco_teorico",
+            "Marco teórico",
+            [
+                rf"(?im){_PARTE}ENCUADRE TE[OÓ]RICO",
+                r"(?m)(?:^|\n)\s*ENCUADRE TE[OÓ]RICO\s*(?:\n|$|\d+\.)",
+                r"(?m)(?:^|\n)\s*MARCO TE[OÓ]RICO\s*(?:\n|$|\d+\.)",
+                r"(?m)(?:^|\n)\s*MARCO CONCEPTUAL\s*(?:\n|$|\d+\.)",
+                r"(?m)(?:^|\n)\s*ESTADO DEL ARTE\s*(?:\n|$|\d+\.)",
+                r"(?m)(?:^|\n)\s*REVISI[ÓO]N(?:\s+DE\s+LITERATURA|\s+BIBLIOGR[AÁ]FICA)\s*(?:\n|$|\d+\.)",
+                r"(?m)(?:^|\n)\s*MARCO TE[OÓ]RICO\b(?=\s+[A-ZÁÉÍÓÚÑ])",
+            ],
+            True,
+        ),
+        (
+            "metodologia",
+            "Metodología",
+            [
+                rf"(?im){_PARTE}DECISIONES EMP",
+                rf"(?im){_PARTE}METODOL",
+                r"(?m)(?:^|\n)\s*METODOLOG[IÍ]A\s*(?:\n|$|\d+\.)",
+                r"(?m)(?:^|\n)\s*MATERIALES Y M[EÉ]TODOS\s*(?:\n|$|\d+\.)",
+                r"(?m)(?:^|\n)\s*DISE[ÑN]O METODOL[ÓO]GICO\s*(?:\n|$|\d+\.)",
+                r"(?m)(?:^|\n)\s*METODOLOG[IÍ]A\b(?=\s+[A-ZÁÉÍÓÚÑ])",
+            ],
+            True,
+        ),
+        (
+            "resultados",
+            "Resultados",
+            [
+                rf"(?im){_PARTE}AN[ÁA]LISIS Y RESULTADOS",
+                rf"(?im){_PARTE}RESULTADOS",
+                r"(?m)(?:^|\n)\s*RESULTADOS(?:\s+Y\s+DISCUSI[ÓO]N)?\s*(?:\n|$|\d+\.)",
+                r"(?m)(?:^|\n)\s*AN[ÁA]LISIS(?:\s+DE\s+)?RESULTADOS\s*(?:\n|$|\d+\.)",
+                r"(?m)(?:^|\n)\s*RESULTADOS\b(?=\s+[A-ZÁÉÍÓÚÑ])",
+            ],
+            False,
+        ),
+        (
+            "discusion",
+            "Discusión",
+            [
+                rf"(?im){_PARTE}DISCUSI[ÓO]N",
+                r"(?m)(?:^|\n)\s*DISCUSI[ÓO]N\s*(?:\n|$|\d+\.)",
+                r"(?m)(?:^|\n)\s*INTERPRETACI[ÓO]N(?:\s+DE(?:\s+LOS)?\s+RESULTADOS)?\s*(?:\n|$|\d+\.)",
+                r"(?m)(?:^|\n)\s*DISCUSI[ÓO]N\b(?=\s+[A-ZÁÉÍÓÚÑ])",
+            ],
+            False,
+        ),
+        (
+            "conclusiones",
+            "Conclusiones",
+            [
+                rf"(?im){_PARTE}CONCLUSIONES",
+                r"(?m)(?:^|\n)\s*CONCLUSIONES(?:\s+GENERALES|\s+FINALES)?\s*(?:\n|$|\d+\.)",
+                r"(?m)(?:^|\n)\s*CONCLUSIONES\b(?=\s+[A-ZÁÉÍÓÚÑ])",
+            ],
+            True,
+        ),
+    ]
+
+    boundaries: list[tuple[int, str, str]] = []
+    for role, default_title, patterns, ignore_case in role_patterns:
+        pos = _first_match_in_order(body, patterns, ignore_case=ignore_case)
+        if pos is not None:
+            boundaries.append((pos, role, default_title))
+
+    boundaries.sort(key=lambda item: item[0])
+    seen_roles: set[str] = set()
+    unique: list[tuple[int, str, str]] = []
+    for pos, role, title in boundaries:
+        if role in seen_roles:
+            continue
+        seen_roles.add(role)
+        unique.append((pos, role, title))
+    return unique
 
 
 def build_non_overlapping_word_partition(body: str) -> tuple[dict[str, str], dict[str, dict]]:
@@ -519,80 +660,28 @@ def build_non_overlapping_word_partition(body: str) -> tuple[dict[str, str], dic
     if not body.strip():
         return {}, {}
 
-    pos_pregunta = _first_match_start(
-        body, r"(?im)(?:^|\n)\s*\d+\.?\s*Pregunta de investigaci"
-    )
-    pos_objetivos_block = _first_match_start(
-        body,
-        r"(?im)(?:^|\n)\s*PREGUNTA DE INVESTIGACI[ÓO]N,\s*OBJETIVOS E HIP[ÓO]TESIS",
-    )
-    if pos_objetivos_block is not None and (
-        pos_pregunta is None or pos_objetivos_block < pos_pregunta
-    ):
-        pos_pregunta = pos_objetivos_block
-    pos_objetivos = _first_match_start(
-        body, r"(?im)(?:^|\n)\s*\d+\.?\s*Objetivo general"
-    )
-    pos_biblio = _first_match_start(body, r"(?im)(?:^|\n)\s*AN[ÁA]LISIS BIBLIOM[EÉ]TRICO")
-    pos_marco = _first_match_start(body, r"(?im)(?:^|\n)\s*MARCO TE[OÓ]RICO\b")
-    if pos_marco is None:
-        pos_marco = _first_match_start(body, r"(?im)(?:^|\n)\s*MARCO CONCEPTUAL\b")
-    if pos_marco is None:
-        pos_marco = _first_match_start(
-            body,
-            r"(?im)(?:^|\n)\s*REVISI[ÓO]N(?:\s+DE\s+LITERATURA|\s+BIBLIOGR[AÁ]FICA)\b",
-        )
-    pos_metod = _first_match_start(body, r"(?im)(?:^|\n)\s*METODOLOG[IÍ]A\b")
-    pos_resultados = _first_match_start(body, r"(?im)(?:^|\n)\s*RESULTADOS\b")
-    pos_discusion = _first_match_start(body, r"(?im)(?:^|\n)\s*DISCUSI[ÓO]N\b")
-    pos_conclusiones = _first_match_start(
-        body, r"(?im)(?:^|\n)\s*CONCLUSIONES(?:\s+GENERALES|\s+FINALES)?\b"
-    )
-
-    major: list[tuple[int, str, str]] = []
-    for pos, role, title in (
-        (pos_biblio, "analisis_bibliometrico", "Análisis bibliométrico"),
-        (pos_marco, "marco_teorico", "Marco teórico"),
-        (pos_metod, "metodologia", "Metodología"),
-        (pos_resultados, "resultados", "Resultados"),
-        (pos_discusion, "discusion", "Discusión"),
-        (pos_conclusiones, "conclusiones", "Conclusiones"),
-    ):
-        if pos is not None:
-            major.append((pos, role, title))
-    major.sort(key=lambda item: item[0])
+    pos_obj_start, obj_title = _find_objetivos_start(body)
+    major = _find_major_section_boundaries(body)
 
     first_major = major[0][0] if major else len(body)
-    obj_end = pos_biblio if pos_biblio is not None and pos_biblio <= first_major else first_major
-    if pos_marco is not None and pos_biblio is None and pos_marco <= first_major:
-        obj_end = pos_marco
+    obj_end = first_major
+    for pos, role, _title in major:
+        if role == "analisis_bibliometrico" and pos <= first_major:
+            obj_end = pos
+            break
 
     sections: dict[str, str] = {}
     meta: dict[str, dict] = {}
 
-    if pos_pregunta is not None and pos_pregunta < first_major:
-        intro = body[:pos_pregunta].strip()
+    if pos_obj_start is not None and pos_obj_start < first_major:
+        intro = body[:pos_obj_start].strip()
         if intro:
             sections["introduccion"] = intro
             meta["introduccion"] = {"detected_titles": ["Introducción"]}
-        obj_block = body[pos_pregunta:obj_end].strip()
+        obj_block = body[pos_obj_start:obj_end].strip()
         if obj_block:
             sections["objetivos"] = obj_block
-            if pos_objetivos_block is not None and pos_pregunta == pos_objetivos_block:
-                meta["objetivos"] = {
-                    "detected_titles": ["Pregunta de investigación, objetivos e hipótesis"]
-                }
-            else:
-                meta["objetivos"] = {"detected_titles": ["Pregunta, objetivos e hipótesis"]}
-    elif pos_objetivos is not None and pos_objetivos < first_major:
-        intro = body[:pos_objetivos].strip()
-        if intro:
-            sections["introduccion"] = intro
-            meta["introduccion"] = {"detected_titles": ["Introducción"]}
-        obj_block = body[pos_objetivos:obj_end].strip()
-        if obj_block:
-            sections["objetivos"] = obj_block
-            meta["objetivos"] = {"detected_titles": ["Objetivos"]}
+            meta["objetivos"] = {"detected_titles": [obj_title or "Pregunta, objetivos e hipótesis"]}
     else:
         intro = body[:first_major].strip()
         if intro:
@@ -610,6 +699,8 @@ def build_non_overlapping_word_partition(body: str) -> tuple[dict[str, str], dic
         if _word_count(chunk) < 20:
             continue
         sections[role] = chunk
-        meta[role] = {"detected_titles": [title]}
+        # Título detectado: texto del encabezado en el documento (hasta ~120 caracteres).
+        heading = re.sub(r"\s+", " ", body[pos : pos + 160].split("\n")[0].strip())[:120]
+        meta[role] = {"detected_titles": [heading or title]}
 
     return sections, meta
