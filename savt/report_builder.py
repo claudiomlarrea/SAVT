@@ -102,6 +102,21 @@ BIBLIOGRAPHY_ISSUE_HINTS = (
     "Muchas referencias APA no detectadas",
 )
 
+# Hallazgos ya desarrollados en «Apartados con observaciones» — no repetir en críticos.
+CHAPTER_DUPLICATE_HINTS = (
+    "introducción incompleta",
+    "marco teórico",
+    "metodología con elementos",
+    "conclusiones no responden",
+    "pregunta no respondida",
+    "pregunta no se responde",
+    "pregunta poco clara",
+    "coherencia objetivos",
+    "objetivo específico",
+    "contribución al conocimiento poco",
+    "originalidad parcialmente",
+)
+
 
 def display_title(finding: Finding) -> str:
     return USER_FACING_TITLES.get(finding.title, finding.title if finding.title.endswith(".") else f"{finding.title}.")
@@ -268,6 +283,34 @@ def build_warnings_list(report: AuditReport, bib_details: dict | None = None) ->
     order = {"error": 0, "warning": 1}
     items.sort(key=lambda x: order.get(x["severity"], 9))
     return items
+
+
+def _is_bibliography_warning(warning: dict) -> bool:
+    raw = (warning.get("finding_title_raw") or warning.get("title", "")).lower()
+    area = (warning.get("area") or "").lower()
+    return area == "bibliografía" or any(h.lower() in raw for h in BIBLIOGRAPHY_ISSUE_HINTS)
+
+
+def _duplicates_chapter_observations(warning: dict) -> bool:
+    raw = (warning.get("finding_title_raw") or warning.get("title", "")).lower()
+    return any(h in raw for h in CHAPTER_DUPLICATE_HINTS)
+
+
+def build_critical_findings_summary(warnings_list: list[dict]) -> dict:
+    """Top problemas sin repetir bibliografía ni apartados ya explicados."""
+    bib_items = [w for w in warnings_list if _is_bibliography_warning(w)]
+    others = [
+        w
+        for w in warnings_list
+        if not _is_bibliography_warning(w) and not _duplicates_chapter_observations(w)
+    ]
+    return {
+        "top_critical": others[:10],
+        "bibliography_issues": bib_items,
+        "bibliography_issue_count": len(bib_items),
+        "total_warnings": len(warnings_list),
+        "suppressed_duplicates": sum(1 for w in warnings_list if _duplicates_chapter_observations(w)),
+    }
 
 
 def _has_bibliography_issues(report: AuditReport, warnings: list[dict], bib_details: dict) -> bool:
@@ -454,6 +497,7 @@ def build_dashboard(report: AuditReport, parsed: dict, extras: dict) -> dict:
         report=report,
     )
     citation_reconciliation = build_citation_reconciliation(parsed, report, bib_dashboard)
+    critical_findings = build_critical_findings_summary(warnings_list)
 
     return {
         "icai": report.score,
@@ -479,6 +523,7 @@ def build_dashboard(report: AuditReport, parsed: dict, extras: dict) -> dict:
         "section_audits": section_audits,
         "findings_by_section": findings_by_section,
         "citation_reconciliation": citation_reconciliation,
+        "critical_findings": critical_findings,
         "profile_label": profile_label,
         "formal_dashboard": extras.get("formal_dashboard") or {},
         "integrity_dashboard": extras.get("integrity_dashboard") or {},

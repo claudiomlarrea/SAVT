@@ -179,110 +179,31 @@ def render_detected_sections(dashboard: dict) -> None:
     st.caption(f"Total clasificado en apartados: **{total_words:,}** palabras en **{len(detected)}** bloques.")
 
 
-def render_section_by_section_audit(dashboard: dict) -> None:
-    """Revisión exhaustiva apartado por apartado con métricas y hallazgos."""
-    from savt.chapter_reviews import CHECK_LABELS
-
+def render_technical_section_detail(dashboard: dict) -> None:
+    """Métricas por apartado y cuadre de citas — colapsado para no duplicar el informe principal."""
     section_audits = dashboard.get("section_audits") or []
-    if not section_audits:
+    reconciliation = dashboard.get("citation_reconciliation") or {}
+    if not section_audits and not reconciliation.get("reconciliation_rows"):
         return
 
-    st.markdown("## Revisión por apartado")
-    st.caption(
-        "Cada apartado detectado se evalúa en extensión, citas, profundidad, checklist estructural "
-        "y hallazgos asociados."
-    )
-
-    summary_rows = section_audit_summary_rows(section_audits)
-    st.dataframe(summary_rows, use_container_width=True, hide_index=True)
-
-    reconciliation = dashboard.get("citation_reconciliation") or {}
-    recon_rows = reconciliation.get("reconciliation_rows") or []
-    if recon_rows:
-        st.markdown("**Cuadre de citas y referencias**")
+    with st.expander("Detalle técnico: métricas por apartado y cuadre de citas", expanded=False):
         st.caption(
-            "«Apariciones cita» cuenta cada paréntesis de cita en el apartado. "
-            "«N° refs distintos» son números/claves únicos. La fila Σ debe coincidir con el cuerpo completo; "
-            "la bibliografía lista entradas, no apariciones."
+            "Vista analítica para revisión avanzada. Las observaciones accionables están en "
+            "«Apartados con observaciones»; el checklist resume el estado de cada capítulo."
         )
-        st.dataframe(recon_rows, use_container_width=True, hide_index=True)
-        for note in reconciliation.get("notes") or []:
-            if "Coincide" in note:
-                st.caption(f"✓ {note}")
-            elif "Diferencia" in note or "Alerta" in note:
-                st.warning(note)
-            else:
-                st.caption(note)
-
-    for audit in section_audits:
-        ok = audit.get("review_ok")
-        partial = audit.get("review_partial", False)
-        badge_ok = ok is True
-        title = audit.get("title", "Apartado")
-        detected = audit.get("detected_as", "—")
-        status_label = conformance_label(badge_ok, partial and not badge_ok)
-        with st.expander(
-            f"{status_label} — {title} — {detected}",
-            expanded=partial or ok is False,
-        ):
-            is_bib = audit.get("role") == "bibliografia"
-            if is_bib:
-                m1, m2, m3, m4, m5 = st.columns(5)
-                with m1:
-                    st.metric("Palabras (bib.)", f"{audit.get('words', 0):,}")
-                with m2:
-                    st.metric("Referencias", audit.get("reference_count", 0))
-                with m3:
-                    st.metric("Citas en texto", audit.get("citation_count", 0))
-                with m4:
-                    st.metric("Hallazgos", audit.get("findings_count", 0))
-                with m5:
-                    st.metric("Estado", audit.get("conformance", "—"))
-            else:
-                m1, m2, m3, m4, m5 = st.columns(5)
-                with m1:
-                    st.metric("Palabras", f"{audit.get('words', 0):,}")
-                with m2:
-                    st.metric("% cuerpo", audit.get("percent_label", "—"))
-                with m3:
-                    st.metric("Apariciones cita", audit.get("citation_occurrences", audit.get("citation_count", 0)))
-                with m4:
-                    st.metric("Refs distintos", audit.get("unique_refs_cited", "—"))
-                with m5:
-                    st.metric("Hallazgos", audit.get("findings_count", 0))
-
-            st.markdown(f"**Estado:** {audit.get('conformance', '—')} · **Profundidad:** {audit.get('depth_label', '—')}")
-            if audit.get("depth_reason"):
-                st.caption(audit["depth_reason"])
-            if audit.get("review_summary"):
-                st.write(audit["review_summary"])
-
-            checks = audit.get("checks") or []
-            if checks:
-                st.markdown("**Checklist estructural**")
-                for check in checks:
-                    st.markdown(
-                        f"{conformance_badge(bool(check.get('ok')))} — "
-                        f"{CHECK_LABELS.get(check.get('label', ''), check.get('label', ''))}",
-                        unsafe_allow_html=True,
-                    )
-
-            missing = (audit.get("missing") or []) + (audit.get("partial_items") or [])
-            if missing:
-                st.markdown("**Qué falta o no está claro**")
-                for label in missing:
-                    st.markdown(f"- {CHECK_LABELS.get(label, label)}")
-
-            if audit.get("why"):
-                st.markdown(f"**Por qué importa:** {audit['why']}")
-            if audit.get("how_to_fix"):
-                st.info(f"**Cómo corregir:** {audit['how_to_fix']}")
-
-            findings = audit.get("findings") or []
-            if findings:
-                st.markdown("**Hallazgos en este apartado**")
-                for item in findings:
-                    st.markdown(f"- **{item.get('title', '')}** — {item.get('detail', '')[:200]}")
+        if section_audits:
+            st.dataframe(section_audit_summary_rows(section_audits), use_container_width=True, hide_index=True)
+        recon_rows = reconciliation.get("reconciliation_rows") or []
+        if recon_rows:
+            st.markdown("**Cuadre de citas y referencias**")
+            st.dataframe(recon_rows, use_container_width=True, hide_index=True)
+            for note in reconciliation.get("notes") or []:
+                if "Coincide" in note:
+                    st.caption(f"✓ {note}")
+                elif "Diferencia" in note or "Alerta" in note:
+                    st.warning(note)
+                else:
+                    st.caption(note)
 
 
 def render_verdict(dashboard: dict) -> None:
@@ -325,6 +246,7 @@ def render_checklist(dashboard: dict) -> None:
     pending_count = sum(1 for item in checklist["items"] if not item["ok"])
 
     st.markdown("## Checklist de presentación")
+    st.caption("Resumen ejecutivo por capítulo. El detalle accionable está en «Apartados con observaciones».")
     st.markdown(f"**Estado:** {checklist['status']}")
 
     for item in checklist["items"]:
@@ -425,10 +347,8 @@ def render_apartados_con_observaciones(dashboard: dict) -> None:
 
     for review in pending:
         partial = review.get("partial", False)
-        st.markdown(
-            f"<h3>{conformance_badge(False, partial)} — {review['title']}</h3>",
-            unsafe_allow_html=True,
-        )
+        status = conformance_label(False, partial)
+        st.markdown(f"### {status} — {review['title']}")
         if review.get("summary"):
             st.write(review["summary"])
         missing = (review.get("missing") or []) + (review.get("partial_items") or [])
@@ -699,7 +619,10 @@ def render_academic_depth(dashboard: dict) -> None:
         return
     st.markdown("## Profundidad académica")
     help_text = content.get("indicator_help") or {}
-    st.caption(help_text.get("section_depth", ""))
+    st.caption(
+        "Indicadores cuantitativos por apartado (extensión, citas, marcadores). "
+        "El estado conforme/no conforme figura en el checklist y en «Apartados con observaciones»."
+    )
 
     section_depth = content.get("section_depth") or []
     if section_depth:
@@ -711,28 +634,14 @@ def render_academic_depth(dashboard: dict) -> None:
             rows.append(
                 {
                     "Apartado": item.get("title", "—"),
-                    "Detectado como": item.get("detected_as", "—"),
                     "Palabras": item.get("words", 0),
                     "Citas": item.get("citation_count", 0),
                     "Marcadores críticos": item.get("critical_markers", 0),
                     "Ind. hallazgos": result_markers if result_markers else "—",
-                    "Profundidad": item.get("depth_label", "—"),
+                    "Índice profundidad": item.get("depth_label", "—"),
                 }
             )
         st.dataframe(rows, use_container_width=True, hide_index=True)
-
-        notes = [
-            item
-            for item in section_depth
-            if item.get("depth_reason") and item.get("depth_status") in {"partial", "weak"}
-        ]
-        if notes:
-            st.markdown("**Por qué no es plenamente conforme**")
-            for item in notes:
-                st.caption(
-                    f"**{item.get('title', '—')}** ({item.get('depth_label', '—')}): "
-                    f"{item.get('depth_reason', '')}"
-                )
 
     st.markdown("**Indicadores transversales**")
     if content.get("hypothesis_detected"):
@@ -864,12 +773,47 @@ def render_bibliography_and_citation(dashboard: dict) -> None:
     render_figures_tables(dashboard)
 
 
+def render_critical_findings(dashboard: dict) -> None:
+    summary = dashboard.get("critical_findings") or {}
+    top = summary.get("top_critical") or []
+    bib_count = summary.get("bibliography_issue_count", 0)
+    suppressed = summary.get("suppressed_duplicates", 0)
+
+    st.markdown("## Hallazgos críticos")
+    st.caption(
+        "Top problemas priorizados por gravedad. No repite apartados ni bibliografía ya detallados arriba."
+    )
+
+    if bib_count:
+        label = "crítico" if bib_count == 1 else "críticos"
+        st.info(
+            f"Se detectaron **{bib_count}** problema(s) bibliográfico(s) {label}. "
+            "Ver detalle en la sección **Bibliografía y citación**."
+        )
+
+    if not top and bib_count == 0:
+        st.success("No se detectaron problemas críticos adicionales fuera de los apartados señalados.")
+        return
+
+    for idx, item in enumerate(top, start=1):
+        st.markdown(f"**{idx}. {item['title']}**")
+        st.caption(item.get("gravity", ""))
+        with st.expander("Ver detalle", expanded=False):
+            if item.get("detail"):
+                st.write(item["detail"])
+            if item.get("how_to_fix"):
+                st.caption(f"Cómo corregir: {item['how_to_fix']}")
+
+    if suppressed:
+        st.caption(
+            f"{suppressed} hallazgo(s) omitido(s) aquí porque ya están explicados en "
+            "«Apartados con observaciones»."
+        )
+
+
 def render_hallazgos(dashboard: dict) -> None:
-    warnings = dashboard.get("warnings_list") or []
-    st.markdown(f"## Hallazgos y advertencias ({len(warnings)})")
-    render_warnings(dashboard)
-    st.divider()
-    render_jury(dashboard)
+    """Compatibilidad: delega en hallazgos críticos."""
+    render_critical_findings(dashboard)
 
 
 def render_bibliography_table(report) -> None:
@@ -966,10 +910,6 @@ def main() -> None:
 
     base_name = uploaded.name.rsplit(".", 1)[0]
 
-    render_detected_sections(dashboard)
-    st.divider()
-    render_section_by_section_audit(dashboard)
-    st.divider()
     render_document_data(dashboard, report)
     st.divider()
     render_verdict(dashboard)
@@ -988,7 +928,11 @@ def main() -> None:
     st.divider()
     render_originality(dashboard)
     st.divider()
-    render_hallazgos(dashboard)
+    render_critical_findings(dashboard)
+    st.divider()
+    render_jury(dashboard)
+    st.divider()
+    render_technical_section_detail(dashboard)
     st.divider()
     render_final_report(report, dashboard, base_name)
 
