@@ -138,7 +138,8 @@ class Heading:
 
 def _normalize_heading(text: str) -> str:
     text = re.sub(r"^\d+(?:\.\d+)*\.?\s*", "", text.strip())
-    text = re.sub(r"^(?:CAPÍTULO|CAPITULO|PARTE|TOMO)\s+[IVXLC\d]+\.?\s*", "", text, flags=re.I)
+    text = re.sub(r"^(?:CAPÍTULO|CAPITULO|PARTE|TOMO)\s+[IVXLC\d]+\s*[:\-–.]?\s*", "", text, flags=re.I)
+    text = re.sub(r"^[:\-–]\s*", "", text.strip())
     return strip_accents(text.lower()).strip()
 
 
@@ -177,7 +178,7 @@ def discover_headings(body: str) -> list[Heading]:
         return []
 
     patterns = [
-        r"(?m)^(CAPÍTULO|CAPITULO)\s+([IVXLC\d]+)\.?\s*(.+)$",
+        r"(?m)^(CAPÍTULO|CAPITULO)\s+([IVXLC\d]+)\s*[:\-–.]?\s*(.+)$",
         r"(?m)^(PRIMERA|SEGUNDA|TERCERA|CUARTA|QUINTA|SEXTA)\s+PARTE(?:\s+[-–]?\s*(.+))?$",
         r"(?m)^(TOMO\s+[IVXLC\d]+)\s*$",
         r"(?m)^(INTRODUCCI[ÓO]N|PLANTEAMIENTO(?:\s+DEL\s+(?:PROBLEMA|TEMA))?|PREGUNTA DE INVESTIGACI[ÓO]N|AN[ÁA]LISIS BIBLIOM[EÉ]TRICO|"
@@ -607,7 +608,15 @@ def _pick_substantive_heading(
     return _first_match_in_order(body, patterns, ignore_case=ignore_case)
 
 
-def _find_objetivos_start(body: str) -> tuple[int | None, str]:
+def _objetivos_match_is_subsection(body: str, pos: int) -> bool:
+    """Descarta «Pregunta/Objetivos» anidados en subsecciones numeradas altas (p. ej. «6. Pregunta…»)."""
+    line_start = body.rfind("\n", 0, pos) + 1
+    prefix = body[line_start:pos]
+    num_match = re.search(r"(\d+)\.\s*$", prefix)
+    return bool(num_match and int(num_match.group(1)) >= 4)
+
+
+def _find_objetivos_start(body: str, *, before_pos: int | None = None) -> tuple[int | None, str]:
     patterns_titles = [
         (
             r"(?im)(?:^|\n)\s*Objetivos y pregunta de investigaci",
@@ -618,11 +627,11 @@ def _find_objetivos_start(body: str) -> tuple[int | None, str]:
             "Pregunta de investigación, objetivos e hipótesis",
         ),
         (
-            r"(?im)(?:^|\n)\s*\d+\.?\s*Pregunta de investigaci",
+            r"(?im)(?:^|\n)\s*(?:[1-3]\.?\s+)?Pregunta de investigaci",
             "Pregunta de investigación",
         ),
         (
-            r"(?im)(?:^|\n)\s*\d+\.?\s*Objetivo general",
+            r"(?im)(?:^|\n)\s*(?:[1-3]\.?\s+)?Objetivo general",
             "Objetivos",
         ),
         (
@@ -635,10 +644,58 @@ def _find_objetivos_start(body: str) -> tuple[int | None, str]:
         ),
     ]
     for pattern, title in patterns_titles:
-        pos = _first_match_start(body, pattern)
-        if pos is not None:
+        for match in re.finditer(pattern, body):
+            pos = match.start()
+            if before_pos is not None and pos >= before_pos:
+                continue
+            if _objetivos_match_is_subsection(body, pos):
+                continue
             return pos, title
     return None, ""
+
+
+_CHAPTER_LINE = re.compile(
+    r"(?m)(?:^|\n)\s*CAP[ÍI]TULO\s+([IVXLC\d]+)\s*[:\-–]\s*(.+)$",
+    re.IGNORECASE,
+)
+_CHAPTER_INLINE_TITLE_STOP = re.compile(
+    r"\s+(?:Este|Esta|Estos|Estas|El|La|Los|Las|En|Se|Un|Una|A)\s+[a-záéíóú]",
+    re.IGNORECASE,
+)
+
+
+def _chapter_subtitle_to_role(subtitle: str) -> tuple[str | None, str]:
+    """Título limpio y rol canónico a partir del subtítulo de un CAPÍTULO."""
+    raw = subtitle.strip()
+    clean = _CHAPTER_INLINE_TITLE_STOP.split(raw, maxsplit=1)[0].strip()
+    clean = re.sub(r"[:\-–.\s]+$", "", clean)
+    role = classify_heading(clean)
+    return role, clean
+
+
+def _find_chapter_boundaries(body: str) -> list[tuple[int, str, str]]:
+    """Localiza apartados principales en tesis organizadas por CAPÍTULO I: TÍTULO."""
+    boundaries: list[tuple[int, str, str]] = []
+    for match in _CHAPTER_LINE.finditer(body):
+        pos = match.start()
+        chapter_num = match.group(1).strip()
+        role, clean_title = _chapter_subtitle_to_role(match.group(2))
+        if role is None or role == "presentacion":
+            continue
+        if role == "introduccion" and pos < 800 and re.search(r"(?im)^\s*INTRODUCCI[ÓO]N\b", body[:pos + 200]):
+            continue
+        display = f"CAPÍTULO {chapter_num}: {clean_title}"
+        boundaries.append((pos, role, display))
+
+    boundaries.sort(key=lambda item: item[0])
+    seen_roles: set[str] = set()
+    unique: list[tuple[int, str, str]] = []
+    for pos, role, title in boundaries:
+        if role in seen_roles:
+            continue
+        seen_roles.add(role)
+        unique.append((pos, role, title))
+    return unique
 
 
 def _find_discusion_between(body: str, start: int, end: int) -> int | None:
@@ -783,6 +840,11 @@ def _find_major_section_boundaries(
                 unique.append((disc_pos, "discusion", "Discusión"))
                 unique.sort(key=lambda item: item[0])
 
+    if len(unique) < 2:
+        chapters = _find_chapter_boundaries(body)
+        if len(chapters) >= 2:
+            return chapters
+
     return unique
 
 
@@ -796,8 +858,13 @@ def build_non_overlapping_word_partition(body: str) -> tuple[dict[str, str], dic
 
     body = _strip_leading_toc(body)
 
-    pos_obj_start, obj_title = _find_objetivos_start(body)
-    major = _find_major_section_boundaries(body, pos_objetivos=pos_obj_start)
+    major = _find_major_section_boundaries(body, pos_objetivos=None)
+    first_section_pos = major[0][0] if major else len(body)
+    pos_obj_start, obj_title = _find_objetivos_start(body, before_pos=first_section_pos)
+    if pos_obj_start is not None:
+        major_obj = _find_major_section_boundaries(body, pos_objetivos=pos_obj_start)
+        if len(major_obj) >= len(major):
+            major = major_obj
 
     first_major = major[0][0] if major else len(body)
     obj_end = first_major
