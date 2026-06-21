@@ -5,7 +5,7 @@ import re
 from savt.chapter_reviews import (
     build_chapter_reviews,
     checklist_status_from_reviews,
-    readiness_emoji,
+    readiness_conformance_label,
 )
 from savt.models import AuditReport, Finding
 from savt.taxonomy import enrich_finding, icao_interpretation, presentation_status, severity_label
@@ -421,7 +421,7 @@ def build_dashboard(report: AuditReport, parsed: dict, extras: dict) -> dict:
     )
     checklist = build_submission_checklist(chapter_reviews)
     readiness = checklist["status"]
-    emoji = readiness_emoji(readiness)
+    emoji = readiness_conformance_label(readiness)
     status_label = readiness
     main_reason = build_main_reason(prioritized, chapter_reviews)
     jury = build_jury_assessment(report, warnings_list, bib_details)

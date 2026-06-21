@@ -113,20 +113,22 @@ def icao_interpretation(score: int) -> str:
 
 
 def presentation_status(score: int, errors: int, warnings: int) -> tuple[str, str, str]:
+    from savt.ui_labels import readiness_conformance_label
+
     if score < 60 or errors >= 3:
-        emoji = "❌"
         label = "No apta para presentar"
         readiness = "No apta para presentación"
+        emoji = readiness_conformance_label(readiness)
     elif errors > 0 or score < 70:
-        emoji = "⚠"
         label = "Requiere correcciones antes de la presentación"
         readiness = "Requiere revisión antes de presentar"
+        emoji = readiness_conformance_label(readiness)
     elif warnings > 0 or score < 80:
-        emoji = "⚠"
         label = "Apta con correcciones menores"
         readiness = "Apta con correcciones menores"
+        emoji = readiness_conformance_label(readiness)
     else:
-        emoji = "✅"
         label = "Lista para presentar"
         readiness = "Lista para presentar"
+        emoji = readiness_conformance_label(readiness)
     return emoji, label, readiness

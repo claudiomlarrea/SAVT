@@ -13,6 +13,7 @@ from savt.institutional_profiles import PROFILES, profile_options
 from savt.report_builder import findings_dataframe_rows
 from savt.taxonomy import AUDIT_AREAS, SEVERITY_LABELS
 from savt.ui_branding import LOGO_PATH, inject_branding
+from savt.ui_labels import conformance_label
 
 st.set_page_config(
     page_title="SAVT — Auditoría de Tesis",
@@ -149,16 +150,8 @@ def render_sidebar(report=None) -> AuditConfig:
     )
 
 
-def icon(ok: bool, partial: bool = False) -> str:
-    if ok:
-        return "✔"
-    if partial:
-        return "⚠"
-    return "✖"
-
-
 def render_verdict(dashboard: dict) -> None:
-    st.markdown("## ICAI — Índice de Conformidad Académica Institucional")
+    st.markdown("## Resultado general (ICAI)")
     st.caption(
         "Mide la preparación global de la tesis para presentación: estructura, coherencia, "
         "bibliografía, citas y calidad formal. Es una guía de revisión previa a la entrega."
@@ -183,8 +176,9 @@ def render_verdict(dashboard: dict) -> None:
             )
 
     with right:
-        st.markdown(f"### Estado general")
-        st.markdown(f"## {dashboard['presentation_emoji']} {dashboard['readiness']}")
+        st.markdown("### Estado general")
+        st.markdown(f"## {dashboard['presentation_emoji']}")
+        st.markdown(f"**{dashboard['readiness']}**")
         st.markdown(f"**Motivo principal:** {dashboard['main_reason']}")
 
 
@@ -192,18 +186,18 @@ def render_checklist(dashboard: dict) -> None:
     from savt.chapter_reviews import CHECK_LABELS
 
     checklist = dashboard["checklist"]
-    st.markdown("## Checklist previo a la entrega")
+    st.markdown("## Checklist de presentación")
     st.markdown(f"**Estado:** {checklist['status']}")
 
     for item in checklist["items"]:
         if item["ok"]:
-            mark = "✔"
+            mark = "Conforme"
         elif item.get("partial"):
-            mark = "⚠"
+            mark = "Parcialmente conforme"
         else:
-            mark = "✖"
+            mark = "No conforme"
 
-        st.markdown(f"{mark} **{item['label']}**")
+        st.markdown(f"**{mark}** — {item['label']}")
 
         if not item["ok"] or item.get("partial"):
             with st.expander(f"Qué revisar en {item['label'].split(' — ')[0]}", expanded=False):
@@ -229,7 +223,6 @@ def render_warnings(dashboard: dict) -> None:
         st.success("No se detectaron advertencias ni errores críticos prioritarios.")
         return
 
-    st.markdown(f"## Advertencias detectadas ({len(warnings)})")
     st.caption(
         "Las páginas indicadas son estimadas a partir del cuerpo del documento "
         "(precisas en PDF; aproximadas en Word según extensión total)."
@@ -294,12 +287,12 @@ def render_structure(dashboard: dict) -> None:
         st.markdown("## Revisión por capítulos")
         for review in chapter_reviews:
             if review["ok"]:
-                mark = "✔"
+                mark = "Conforme"
             elif review.get("partial"):
-                mark = "⚠"
+                mark = "Parcialmente conforme"
             else:
-                mark = "✖"
-            st.markdown(f"### {mark} {review['title']}")
+                mark = "No conforme"
+            st.markdown(f"### {mark} — {review['title']}")
             if review["ok"]:
                 st.caption(review.get("summary", "Apartado conforme."))
                 continue
@@ -317,7 +310,7 @@ def render_structure(dashboard: dict) -> None:
         return
 
     structure = dashboard["structure"]
-    st.markdown("## Estructura del trabajo")
+    st.markdown("## Estructura del documento")
 
     sections = [
         ("Introducción", "introduccion", ["problema", "justificación", "pregunta", "objetivos"]),
@@ -341,13 +334,13 @@ def render_structure(dashboard: dict) -> None:
         checks = {c["label"]: c for c in block.get("checks", [])}
         st.markdown(f"**{title}**")
         if not checks:
-            st.markdown(f"{icon(block.get('present', False))} {'Presente' if block.get('present') else 'No detectada claramente'}")
+            st.markdown(f"- **{conformance_label(block.get('present', False))}** — {'Presente' if block.get('present') else 'No detectada claramente'}")
             continue
         st.markdown("*Tiene:*")
         for label in labels:
             check = checks.get(label, {})
             partial = check.get("partial", False)
-            st.markdown(f"- {icon(check.get('ok', False), partial)} {label}")
+            st.markdown(f"- **{conformance_label(check.get('ok', False), partial)}** — {label}")
         st.markdown("")
 
 
@@ -359,7 +352,7 @@ def render_research_question(dashboard: dict) -> None:
     st.markdown(f"**Pregunta detectada:** {block['question']}")
     st.markdown("**Evaluación:**")
     for check in block.get("checks", []):
-        st.markdown(f"- {icon(check['ok'], check.get('partial', False))} {check['label']}")
+        st.markdown(f"- **{conformance_label(check['ok'], check.get('partial', False))}** — {check['label']}")
 
 
 def render_objectives(dashboard: dict) -> None:
@@ -375,33 +368,39 @@ def render_objectives(dashboard: dict) -> None:
             "parcialmente respondido": "Parcialmente respondido",
             "sin evidencia clara": "Sin evidencia clara",
         }.get(item["status"], item["status"].capitalize())
-        st.markdown(f"**Objetivo específico {item['number']}** — {icon(responded, partial)} {label}")
+        st.markdown(f"**Objetivo específico {item['number']}** — **{conformance_label(responded, partial)}** — {label}")
         st.caption(item["text"][:240] + ("…" if len(item["text"]) > 240 else ""))
 
 
 def render_bibliography(dashboard: dict) -> None:
     bib = dashboard["bibliography_dashboard"]
     details = bib.get("details") or {}
-    st.markdown("## Bibliografía")
+    st.markdown("## Bibliografía y citación")
 
     summary_lines = [
-        f"✔ Estilo {bib['style']} correcto",
-        f"✔ {bib['total_refs']} referencias",
-        f"✔ {bib['citations_found']} citas encontradas",
+        f"**{conformance_label(True)}** — Estilo {bib['style']} detectado",
+        f"**{conformance_label(True)}** — {bib['total_refs']} referencias",
+        f"**{conformance_label(True)}** — {bib['citations_found']} citas encontradas",
     ]
     if bib["unmatched_citations"]:
-        summary_lines.append(f"⚠ {bib['unmatched_citations']} citas no emparejadas")
+        summary_lines.append(
+            f"**{conformance_label(False, True)}** — {bib['unmatched_citations']} citas no emparejadas"
+        )
     else:
-        summary_lines.append("✔ Citas emparejadas con bibliografía")
+        summary_lines.append(f"**{conformance_label(True)}** — Citas emparejadas con bibliografía")
     if bib["out_of_period"]:
-        summary_lines.append(f"⚠ {bib['out_of_period']} referencias fuera del período metodológico")
+        summary_lines.append(
+            f"**{conformance_label(False, True)}** — {bib['out_of_period']} referencias fuera del período metodológico"
+        )
     if bib["possibly_off_topic"]:
         summary_lines.append(
-            f"⚠ {bib['possibly_off_topic']} referencias podrían no estar relacionadas con el tema"
+            f"**{conformance_label(False, True)}** — "
+            f"{bib['possibly_off_topic']} referencias podrían no estar relacionadas con el tema"
         )
     coverage_ok = bib["coverage"] == "adecuada"
     summary_lines.append(
-        f"{'✔' if coverage_ok else '⚠'} Cobertura bibliográfica {bib['coverage']}"
+        f"**{conformance_label(coverage_ok, not coverage_ok and bib['coverage'] != '—')}** — "
+        f"Cobertura bibliográfica {bib['coverage']}"
     )
     for line in summary_lines:
         st.markdown(line)
@@ -472,27 +471,33 @@ def render_figures_tables(dashboard: dict) -> None:
     if not figures and not tables:
         return
 
-    st.markdown("## Figuras y tablas")
+    st.markdown("### Figuras y tablas")
     for fig in figures:
         st.markdown(f"**Figura {fig['number']}**")
         parts = []
         if not fig["has_number"]:
-            parts.append("⚠ Sin número claro")
+            parts.append("No conforme — Sin número claro")
         else:
-            parts.append("✔ Tiene número")
-        parts.append(f"{'✔' if fig['has_title'] else '⚠'} Tiene título")
-        parts.append(f"{'✔' if fig['cited_in_text'] else '⚠ No se menciona en el texto'}")
-        parts.append(f"{'✔' if fig['has_source'] else '⚠ No indica fuente'}")
+            parts.append("Conforme — Tiene número")
+        parts.append(f"{conformance_label(fig['has_title'])} — Tiene título")
+        parts.append(
+            f"{conformance_label(fig['cited_in_text'], not fig['cited_in_text'])} — "
+            f"{'Citada en el texto' if fig['cited_in_text'] else 'No se menciona en el texto'}"
+        )
+        parts.append(f"{conformance_label(fig['has_source'], not fig['has_source'])} — Fuente indicada")
         st.markdown(" · ".join(parts))
         st.caption(fig["title"][:180])
 
     for tab in tables:
         st.markdown(f"**Tabla {tab['number']}**")
         parts = []
-        parts.append(f"{'✔' if tab['has_number'] else '⚠'} Numeración")
-        parts.append(f"{'✔' if tab['has_title'] else '⚠'} Título")
-        parts.append(f"{'✔' if tab['has_source'] else '⚠'} Fuente")
-        parts.append(f"{'✔' if tab['cited_in_text'] else '⚠'} Mención en texto")
+        parts.append(f"{conformance_label(tab['has_number'])} — Numeración")
+        parts.append(f"{conformance_label(tab['has_title'])} — Título")
+        parts.append(f"{conformance_label(tab['has_source'])} — Fuente")
+        parts.append(
+            f"{conformance_label(tab['cited_in_text'], not tab['cited_in_text'])} — "
+            f"{'Mención en texto' if tab['cited_in_text'] else 'Sin mención en texto'}"
+        )
         st.markdown(" · ".join(parts))
         st.caption(tab["title"][:180])
 
@@ -501,8 +506,7 @@ def render_formal(dashboard: dict) -> None:
     formal = dashboard.get("formal_dashboard") or {}
     if not formal:
         return
-    st.markdown("## Normativa institucional")
-    st.caption(f"Perfil: {dashboard.get('profile_label', '—')}")
+    st.caption(f"Perfil normativo: {dashboard.get('profile_label', '—')}")
 
     items = [
         ("Portada completa", formal.get("portada_completa")),
@@ -514,7 +518,7 @@ def render_formal(dashboard: dict) -> None:
     for label, ok in items:
         if ok is None:
             continue
-        st.markdown(f"{'✔' if ok else '⚠'} {label}")
+        st.markdown(f"**{conformance_label(bool(ok), ok is False)}** — {label}")
 
     abstract_words = formal.get("abstract_words", 0)
     if abstract_words:
@@ -561,8 +565,8 @@ def render_ethics(dashboard: dict) -> None:
 
     checklist = ethics.get("checklist") or []
     for item in checklist:
-        mark = "✔" if item.get("found") else "✖"
-        st.markdown(f"{mark} {item.get('label', '')}")
+        mark = conformance_label(bool(item.get("found")))
+        st.markdown(f"**{mark}** — {item.get('label', '')}")
 
     found = ethics.get("found_count", 0)
     total = ethics.get("total", 0)
@@ -571,25 +575,30 @@ def render_ethics(dashboard: dict) -> None:
         st.caption(f"{found}/{total} elementos éticos detectados en el texto")
 
 
-def render_content_depth(dashboard: dict) -> None:
+def render_document_data(dashboard: dict, report) -> None:
     content = dashboard.get("content_dashboard") or {}
-    if not content:
-        return
-    st.markdown("## Profundidad académica")
-    help_text = content.get("indicator_help") or {}
+    formal = dashboard.get("formal_dashboard") or {}
+    st.markdown("## Datos del documento")
+    st.caption(f"Perfil: {dashboard.get('profile_label', '—')}")
 
-    cols = st.columns(2)
-    with cols[0]:
-        st.metric("Palabras totales (cuerpo)", f"{content.get('total_body_words', 0):,}")
-        st.caption(help_text.get("total_body_words", ""))
-    with cols[1]:
-        bib_words = content.get("bibliography_words", 0)
-        st.metric("Palabras bibliografía", f"{bib_words:,}" if bib_words else "—")
-        st.caption(help_text.get("bibliography_words", ""))
+    meta_cols = st.columns(4)
+    with meta_cols[0]:
+        st.metric("Palabras (cuerpo)", f"{report.word_count:,}")
+    with meta_cols[1]:
+        st.metric("Referencias", len(report.bibliography))
+    with meta_cols[2]:
+        pages = report.metadata.get("pdf_page_count") or report.page_estimate
+        st.metric("Páginas", pages)
+    with meta_cols[3]:
+        st.metric("Estilo de citación", report.metadata.get("citation_style", "—").upper())
+
+    help_text = content.get("indicator_help") or {}
+    if content.get("bibliography_words"):
+        st.caption(f"Bibliografía: {content['bibliography_words']:,} palabras.")
 
     sections = content.get("sections") or []
     if sections:
-        st.markdown("**Palabras por apartado (total agregado)**")
+        st.markdown("### Estructura del documento")
         st.caption(help_text.get("sections", ""))
         rows = [
             {
@@ -601,7 +610,18 @@ def render_content_depth(dashboard: dict) -> None:
         ]
         st.dataframe(rows, use_container_width=True, hide_index=True)
 
-    st.markdown("**Indicadores del marco teórico**")
+    if formal:
+        with st.expander("Normativa formal detectada", expanded=False):
+            render_formal(dashboard)
+
+
+def render_academic_depth(dashboard: dict) -> None:
+    content = dashboard.get("content_dashboard") or {}
+    if not content:
+        return
+    st.markdown("## Profundidad académica")
+    help_text = content.get("indicator_help") or {}
+
     cols = st.columns(3)
     with cols[0]:
         st.metric("Palabras marco teórico", content.get("marco_word_count", 0))
@@ -614,11 +634,19 @@ def render_content_depth(dashboard: dict) -> None:
         st.caption(help_text.get("critical_markers_found", ""))
 
     if content.get("hypothesis_detected"):
-        st.markdown("✔ Hipótesis detectada")
+        st.markdown(f"**{conformance_label(True)}** — Hipótesis detectada")
     results = content.get("results_development")
     if results and results != "unknown":
-        label = "adecuada" if results == "adequate" else "requiere refuerzo"
-        st.markdown(f"**Desarrollo de resultados:** {label}")
+        adequate = results == "adequate"
+        label = "adecuada" if adequate else "requiere refuerzo"
+        st.markdown(
+            f"**{conformance_label(adequate, not adequate)}** — Desarrollo de resultados: {label}"
+        )
+
+
+def render_content_depth(dashboard: dict) -> None:
+    """Compatibilidad: delega en profundidad académica."""
+    render_academic_depth(dashboard)
 
 
 def render_originality(dashboard: dict) -> None:
@@ -685,6 +713,54 @@ def render_findings_table(report) -> None:
             df = pd.concat([df, pd.DataFrame(ok_rows)], ignore_index=True)
         filtered = df[df["Severidad"].isin(severity_filter) & df["Área"].isin(area_filter)]
         st.dataframe(filtered, use_container_width=True, hide_index=True)
+
+
+def render_final_report(report, dashboard: dict, base_name: str) -> None:
+    st.markdown("## Informe final SAVT")
+    st.caption(
+        "Descargue el informe completo o explore el detalle tabular de hallazgos y referencias."
+    )
+    render_findings_table(report)
+    render_bibliography_table(report)
+
+    col_csv, col_docx = st.columns(2)
+    csv = pd.DataFrame(findings_dataframe_rows(report)).to_csv(index=False).encode("utf-8")
+    with col_csv:
+        st.download_button(
+            "Descargar informe CSV",
+            data=csv,
+            file_name=f"informe_savt_{base_name}.csv",
+            mime="text/csv",
+            use_container_width=True,
+        )
+    with col_docx:
+        docx_bytes = build_report_docx(report, dashboard)
+        st.download_button(
+            "Descargar informe Word (.docx)",
+            data=docx_bytes,
+            file_name=f"informe_savt_{base_name}.docx",
+            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            use_container_width=True,
+        )
+
+
+def render_bibliography_and_citation(dashboard: dict) -> None:
+    render_bibliography(dashboard)
+    render_figures_tables(dashboard)
+
+
+def render_chapter_review(dashboard: dict) -> None:
+    render_structure(dashboard)
+    render_research_question(dashboard)
+    render_objectives(dashboard)
+
+
+def render_hallazgos(dashboard: dict) -> None:
+    warnings = dashboard.get("warnings_list") or []
+    st.markdown(f"## Hallazgos y advertencias ({len(warnings)})")
+    render_warnings(dashboard)
+    st.divider()
+    render_jury(dashboard)
 
 
 def render_bibliography_table(report) -> None:
@@ -755,54 +831,29 @@ def main() -> None:
         st.error("Informe incompleto. Vuelva a ejecutar la auditoría.")
         return
 
+    base_name = uploaded.name.rsplit(".", 1)[0]
+
+    render_document_data(dashboard, report)
+    st.divider()
     render_verdict(dashboard)
     st.divider()
     render_checklist(dashboard)
     st.divider()
-    render_warnings(dashboard)
+    render_chapter_review(dashboard)
     st.divider()
-    render_jury(dashboard)
-    st.divider()
-    render_formal(dashboard)
+    render_bibliography_and_citation(dashboard)
     st.divider()
     render_integrity(dashboard)
     st.divider()
     render_ethics(dashboard)
     st.divider()
-    render_content_depth(dashboard)
+    render_academic_depth(dashboard)
     st.divider()
     render_originality(dashboard)
     st.divider()
-    render_structure(dashboard)
-    render_research_question(dashboard)
-    render_objectives(dashboard)
-    render_bibliography(dashboard)
-    render_figures_tables(dashboard)
+    render_hallazgos(dashboard)
     st.divider()
-    render_findings_table(report)
-    render_bibliography_table(report)
-
-    base_name = uploaded.name.rsplit(".", 1)[0]
-    col_csv, col_docx = st.columns(2)
-
-    csv = pd.DataFrame(findings_dataframe_rows(report)).to_csv(index=False).encode("utf-8")
-    with col_csv:
-        st.download_button(
-            "Descargar informe CSV",
-            data=csv,
-            file_name=f"informe_savt_{base_name}.csv",
-            mime="text/csv",
-            use_container_width=True,
-        )
-    with col_docx:
-        docx_bytes = build_report_docx(report, dashboard)
-        st.download_button(
-            "Descargar informe Word (.docx)",
-            data=docx_bytes,
-            file_name=f"informe_savt_{base_name}.docx",
-            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            use_container_width=True,
-        )
+    render_final_report(report, dashboard, base_name)
 
 
 if __name__ == "__main__":

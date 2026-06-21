@@ -509,10 +509,12 @@ def checklist_status_from_reviews(reviews: list[dict]) -> str:
     return "Requiere revisión antes de presentar"
 
 
+def readiness_conformance_label(status: str) -> str:
+    from savt.ui_labels import readiness_conformance_label as label
+
+    return label(status)
+
+
 def readiness_emoji(status: str) -> str:
-    return {
-        "Lista para presentar": "✅",
-        "Apta con correcciones menores": "⚠",
-        "Requiere revisión antes de presentar": "⚠",
-        "No apta para presentar": "❌",
-    }.get(status, "⚠")
+    """Compatibilidad: devuelve etiqueta textual de conformidad."""
+    return readiness_conformance_label(status)
