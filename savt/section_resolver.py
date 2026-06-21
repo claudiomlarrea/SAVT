@@ -641,6 +641,19 @@ def _find_objetivos_start(body: str) -> tuple[int | None, str]:
     return None, ""
 
 
+def _find_discusion_between(body: str, start: int, end: int) -> int | None:
+    """Última aparición de «Discusión» como encabezado entre resultados y conclusiones."""
+    if start >= end:
+        return None
+    hits = [
+        start + match.start()
+        for match in re.finditer(r"(?m)(?:^|\n)\s*Discusi[oó]n\b", body[start:end])
+    ]
+    if not hits:
+        return None
+    return hits[-1]
+
+
 def _find_major_section_boundaries(
     body: str,
     *,
@@ -693,8 +706,8 @@ def _find_major_section_boundaries(
             [
                 rf"(?im){_PARTE}AN[ÁA]LISIS Y RESULTADOS",
                 rf"(?im){_PARTE}RESULTADOS",
-                r"(?m)(?:^|\n)\s*Resultados\s",
-                r"(?m)(?:^|\n)\s*RESULTADOS(?:\s+Y\s+DISCUSI[ÓO]N)?\s*(?:\n|$|\d+\.)",
+                r"(?m)(?:^|\n)\s*RESULTADOS\s*(?:\n|$|\d+\.)",
+                r"(?m)(?:^|\n)\s*Resultados\s*(?:\n|$|\d+\.)",
                 r"(?m)(?:^|\n)\s*AN[ÁA]LISIS(?:\s+DE\s+)?RESULTADOS\s*(?:\n|$|\d+\.)",
                 r"(?m)(?:^|\n)\s*RESULTADOS\b(?=\s+[A-ZÁÉÍÓÚÑ])",
             ],
@@ -705,8 +718,10 @@ def _find_major_section_boundaries(
             "Discusión",
             [
                 rf"(?im){_PARTE}DISCUSI[ÓO]N",
+                r"(?m)(?:^|\n)\s*Discusi[oó]n\s*(?:\n|$|\d+\.)",
                 r"(?m)(?:^|\n)\s*DISCUSI[ÓO]N\s*(?:\n|$|\d+\.)",
                 r"(?m)(?:^|\n)\s*INTERPRETACI[ÓO]N(?:\s+DE(?:\s+LOS)?\s+RESULTADOS)?\s*(?:\n|$|\d+\.)",
+                r"(?m)(?:^|\n)\s*Discusi[oó]n\b(?=\s+[A-ZÁÉÍÓÚÑ])",
                 r"(?m)(?:^|\n)\s*DISCUSI[ÓO]N\b(?=\s+[A-ZÁÉÍÓÚÑ])",
             ],
             False,
@@ -743,6 +758,8 @@ def _find_major_section_boundaries(
                 pos = _pick_substantive_heading(body, patterns, ignore_case=ignore_case)
         elif role == "resultados":
             pos = _first_match_in_order(body, patterns, ignore_case=ignore_case)
+        elif role == "discusion":
+            pos = _first_match_in_order(body, patterns, ignore_case=ignore_case)
         else:
             pos = _pick_substantive_heading(body, patterns, ignore_case=ignore_case)
         if pos is not None:
@@ -756,6 +773,16 @@ def _find_major_section_boundaries(
             continue
         seen_roles.add(role)
         unique.append((pos, role, title))
+
+    if "discusion" not in seen_roles:
+        res_pos = next((pos for pos, role, _ in unique if role == "resultados"), None)
+        concl_pos = next((pos for pos, role, _ in unique if role == "conclusiones"), None)
+        if res_pos is not None and concl_pos is not None and concl_pos > res_pos:
+            disc_pos = _find_discusion_between(body, res_pos, concl_pos)
+            if disc_pos is not None:
+                unique.append((disc_pos, "discusion", "Discusión"))
+                unique.sort(key=lambda item: item[0])
+
     return unique
 
 
