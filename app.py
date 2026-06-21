@@ -564,18 +564,26 @@ def render_academic_depth(dashboard: dict) -> None:
         return
     st.markdown("## Profundidad académica")
     help_text = content.get("indicator_help") or {}
+    st.caption(help_text.get("section_depth", ""))
 
-    cols = st.columns(3)
-    with cols[0]:
-        st.metric("Palabras marco teórico", content.get("marco_word_count", 0))
-        st.caption(help_text.get("marco_word_count", ""))
-    with cols[1]:
-        st.metric("Densidad de citas /100 pal.", content.get("citation_density_marco", 0))
-        st.caption(help_text.get("citation_density_marco", ""))
-    with cols[2]:
-        st.metric("Marcadores críticos", content.get("critical_markers_found", 0))
-        st.caption(help_text.get("critical_markers_found", ""))
+    section_depth = content.get("section_depth") or []
+    if section_depth:
+        rows = []
+        for item in section_depth:
+            result_markers = item.get("result_markers", 0)
+            rows.append(
+                {
+                    "Apartado": item.get("title", "—"),
+                    "Palabras": item.get("words", 0),
+                    "Citas /100 pal.": item.get("citation_density", 0),
+                    "Marcadores críticos": item.get("critical_markers", 0),
+                    "Ind. hallazgos": result_markers if result_markers else "—",
+                    "Profundidad": item.get("depth_label", "—"),
+                }
+            )
+        st.dataframe(rows, use_container_width=True, hide_index=True)
 
+    st.markdown("**Indicadores transversales**")
     if content.get("hypothesis_detected"):
         st.markdown(
             f"{conformance_badge(True)} — Hipótesis detectada",

@@ -5,7 +5,7 @@ import re
 from savt.audit_config import AuditConfig
 from savt.document_sections import extract_section, get_section_map
 from savt.models import Finding
-from savt.word_stats import build_word_statistics, count_words
+from savt.word_stats import CANONICAL_SECTION_ORDER, build_word_statistics, count_words
 
 CRITICAL_MARKERS = [
     "sin embargo",
@@ -41,6 +41,111 @@ RESULTS_MARKERS = [
     "gráfico",
 ]
 
+ROLE_DEPTH_RULES: dict[str, dict] = {
+    "presentacion": {"min_words": 80},
+    "introduccion": {"min_words": 350, "min_density": 0.4},
+    "objetivos": {"min_words": 50},
+    "marco_teorico": {"min_words": 800, "min_density": 1.0, "min_critical": 2},
+    "metodologia": {"min_words": 350, "min_density": 0.2},
+    "resultados": {"min_words": 250, "min_result_markers": 2},
+    "discusion": {"min_words": 450, "min_density": 0.6, "min_critical": 2},
+    "conclusiones": {"min_words": 150, "min_critical": 1},
+}
+
+DEPTH_STATUS_LABELS = {
+    "adequate": "Conforme",
+    "partial": "Parcialmente conforme",
+    "weak": "No conforme",
+    "missing": "No detectado",
+}
+
+
+def _count_citations(text: str) -> int:
+    cites = len(re.findall(r"\(\d+(?:[,\s\-–]\d+)*\)", text))
+    cites += len(re.findall(r"\([A-ZÁÉÍÓÚÑ][^)]*,\s*\d{4}", text))
+    return cites
+
+
+def _section_metrics(text: str) -> dict:
+    words = count_words(text)
+    if words <= 0:
+        return {
+            "words": 0,
+            "citation_density": 0.0,
+            "critical_markers": 0,
+            "result_markers": 0,
+        }
+    lower = text.lower()
+    critical = sum(1 for marker in CRITICAL_MARKERS if marker in lower)
+    result_markers = sum(1 for marker in RESULTS_MARKERS if marker in lower)
+    density = round(_count_citations(text) / (words / 100), 2)
+    return {
+        "words": words,
+        "citation_density": density,
+        "critical_markers": critical,
+        "result_markers": result_markers,
+    }
+
+
+def _assess_section_depth(role: str, metrics: dict) -> str:
+    rules = ROLE_DEPTH_RULES.get(role, {"min_words": 100})
+    words = metrics["words"]
+    if words <= 0:
+        return "missing"
+    if words < rules.get("min_words", 100) * 0.5:
+        return "weak"
+
+    checks = ["min_words"]
+    passed = 1 if words >= rules.get("min_words", 0) else 0
+
+    if "min_density" in rules:
+        checks.append("min_density")
+        if metrics["citation_density"] >= rules["min_density"]:
+            passed += 1
+    if "min_critical" in rules:
+        checks.append("min_critical")
+        if metrics["critical_markers"] >= rules["min_critical"]:
+            passed += 1
+    if "min_result_markers" in rules:
+        checks.append("min_result_markers")
+        if metrics["result_markers"] >= rules["min_result_markers"]:
+            passed += 1
+
+    total = len(checks)
+    if passed == total:
+        return "adequate"
+    if passed >= max(1, total - 1):
+        return "partial"
+    return "weak"
+
+
+def build_section_depth_analysis(parsed: dict) -> list[dict]:
+    body = parsed.get("body", "")
+    role_texts = dict(parsed.get("section_map") or get_section_map(body))
+    marco_fallback = _marco_text(parsed)
+    if len(marco_fallback) > len(role_texts.get("marco_teorico", "")):
+        role_texts["marco_teorico"] = marco_fallback
+
+    rows: list[dict] = []
+
+    for role, label in CANONICAL_SECTION_ORDER:
+        text = role_texts.get(role, "")
+        metrics = _section_metrics(text)
+        depth_status = _assess_section_depth(role, metrics)
+        row = {
+            "role": role,
+            "title": label,
+            "words": metrics["words"],
+            "citation_density": metrics["citation_density"],
+            "critical_markers": metrics["critical_markers"],
+            "result_markers": metrics["result_markers"],
+            "depth_status": depth_status,
+            "depth_label": DEPTH_STATUS_LABELS[depth_status],
+        }
+        rows.append(row)
+
+    return rows
+
 
 def _marco_text(parsed: dict) -> str:
     section_map = parsed.get("section_map") or get_section_map(parsed.get("body", ""))
@@ -66,11 +171,14 @@ def audit_content_quality(parsed: dict, config: AuditConfig) -> tuple[list[Findi
     body = parsed.get("body", "")
     marco = _marco_text(parsed)
     word_stats = build_word_statistics(parsed)
+    section_depth = build_section_depth_analysis(parsed)
+    marco_row = next((row for row in section_depth if row["role"] == "marco_teorico"), None)
     dashboard: dict = {
         **word_stats,
-        "marco_word_count": count_words(marco) if marco else 0,
-        "citation_density_marco": 0.0,
-        "critical_markers_found": 0,
+        "section_depth": section_depth,
+        "marco_word_count": marco_row["words"] if marco_row else 0,
+        "citation_density_marco": marco_row["citation_density"] if marco_row else 0.0,
+        "critical_markers_found": marco_row["critical_markers"] if marco_row else 0,
         "hypothesis_detected": False,
         "results_development": "unknown",
         "indicator_help": {
@@ -83,17 +191,21 @@ def audit_content_quality(parsed: dict, config: AuditConfig) -> tuple[list[Findi
                 "metodología, resultados, etc.). Cada fila suma todo el contenido detectado "
                 "bajo ese rol, sin listar subsecciones."
             ),
+            "section_depth": (
+                "Indicadores de profundidad académica por apartado canónico: extensión, "
+                "densidad de citas cada 100 palabras, marcadores de análisis crítico e "
+                "indicadores de presentación de hallazgos (en resultados). La columna "
+                "Profundidad resume si el apartado alcanza expectativas heurísticas para su rol."
+            ),
             "marco_word_count": (
                 "Palabras en marco teórico / revisión bibliográfica (rol canónico). "
-                "Puede solaparse con filas del desglose por apartados."
+                "Incluido en la tabla por apartados."
             ),
             "citation_density_marco": (
-                "Promedio de citas bibliográficas cada 100 palabras del marco teórico. "
-                "Valores más altos suelen reflejar mayor apoyo documental."
+                "Densidad de citas del marco teórico. Ver también la tabla por apartados."
             ),
             "critical_markers_found": (
-                "Expresiones de análisis crítico (contrastes, autores citados, limitaciones, debates). "
-                "Cuenta indicios de lectura activa, no profundidad por sí sola."
+                "Marcadores críticos en el marco teórico. Ver desglose completo por apartados."
             ),
         },
     }
@@ -102,13 +214,12 @@ def audit_content_quality(parsed: dict, config: AuditConfig) -> tuple[list[Findi
         return findings, dashboard
 
     if marco:
-        critical_found = sum(1 for m in CRITICAL_MARKERS if m in marco.lower())
+        marco_metrics = _section_metrics(marco)
+        critical_found = marco_metrics["critical_markers"]
+        marco_words = marco_metrics["words"]
+        density = marco_metrics["citation_density"]
         dashboard["critical_markers_found"] = critical_found
-        marco_words = dashboard["marco_word_count"]
-        words = max(marco_words, 1)
-        cites = len(re.findall(r"\(\d+(?:[,\s\-–]\d+)*\)", marco))
-        cites += len(re.findall(r"\([A-ZÁÉÍÓÚÑ][^)]*,\s*\d{4}", marco))
-        density = round(cites / (words / 100), 2)
+        dashboard["marco_word_count"] = marco_words
         dashboard["citation_density_marco"] = density
 
         if marco_words < 800:

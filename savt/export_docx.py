@@ -287,7 +287,7 @@ def build_report_docx(report: AuditReport, dashboard: dict) -> bytes:
         mark = "Sí" if item.get("found") else "No detectado"
         _add_bullet(doc, f"{item.get('label', '')}: {mark}")
 
-    _add_heading(doc, "8. Profundidad y originalidad", 1)
+    _add_heading(doc, "8. Profundidad académica", 1)
     content = dashboard.get("content_dashboard") or {}
     orig = dashboard.get("originality_dashboard") or {}
     _add_label_paragraph(doc, "Palabras totales (cuerpo)", str(content.get("total_body_words", 0)))
@@ -298,8 +298,20 @@ def build_report_docx(report: AuditReport, dashboard: dict) -> bytes:
             f"{item.get('title', '—')}: {item.get('words', 0)} palabras "
             f"({item.get('percent_label', '—')} del cuerpo)",
         )
-    _add_label_paragraph(doc, "Palabras marco teórico (rol canónico)", str(content.get("marco_word_count", 0)))
-    _add_label_paragraph(doc, "Densidad de citas marco", str(content.get("citation_density_marco", 0)))
+    section_depth = content.get("section_depth") or []
+    if section_depth:
+        doc.add_paragraph("Profundidad por apartado canónico:")
+        for item in section_depth:
+            result_part = ""
+            if item.get("result_markers"):
+                result_part = f", ind. hallazgos {item['result_markers']}"
+            _add_bullet(
+                doc,
+                f"{item.get('title', '—')}: {item.get('words', 0)} palabras, "
+                f"{item.get('citation_density', 0)} citas/100 pal., "
+                f"{item.get('critical_markers', 0)} marcadores críticos{result_part} "
+                f"— {item.get('depth_label', '—')}",
+            )
     _add_label_paragraph(doc, "Índice proxy originalidad", f"{orig.get('score_proxy', 0)}/100")
 
     _add_heading(doc, "9. Apartados con observaciones", 1)
