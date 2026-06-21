@@ -198,6 +198,29 @@ def build_report_docx(report: AuditReport, dashboard: dict) -> bytes:
     _add_label_paragraph(doc, "Páginas estimadas", str(report.page_estimate))
     _add_label_paragraph(doc, "Referencias detectadas", str(len(report.bibliography)))
 
+    detected = dashboard.get("detected_sections") or []
+    if detected:
+        _add_heading(doc, "1.1 Apartados detectados en el documento", 2)
+        for sec in detected:
+            _add_bullet(
+                doc,
+                f"{sec.get('title', '—')} — detectado como «{sec.get('detected_as', '—')}»: "
+                f"{sec.get('words', 0)} palabras ({sec.get('percent_label', '—')})",
+            )
+
+    section_audits = dashboard.get("section_audits") or []
+    if section_audits:
+        _add_heading(doc, "1.2 Revisión por apartado", 2)
+        for audit in section_audits:
+            line = (
+                f"{audit.get('title', '—')}: {audit.get('conformance', '—')} — "
+                f"{audit.get('words', 0)} palabras, {audit.get('citation_count', 0)} citas, "
+                f"{audit.get('findings_count', 0)} hallazgos"
+            )
+            _add_bullet(doc, line)
+            if audit.get("depth_reason"):
+                doc.add_paragraph(audit["depth_reason"]).paragraph_format.left_indent = Inches(0.25)
+
     _add_heading(doc, "2. Checklist previo a la entrega", 1)
     checklist = dashboard.get("checklist", {})
     _add_label_paragraph(doc, "Estado del checklist", checklist.get("status", "—"))

@@ -9,6 +9,11 @@ from savt.chapter_reviews import (
 )
 from savt.content_quality import reconcile_section_depth_with_reviews
 from savt.models import AuditReport, Finding
+from savt.section_audit import (
+    build_section_audits,
+    detect_document_sections,
+    group_findings_by_section,
+)
 from savt.taxonomy import enrich_finding, icao_interpretation, presentation_status, severity_label
 
 USER_FACING_TITLES: dict[str, str] = {
@@ -434,6 +439,16 @@ def build_dashboard(report: AuditReport, parsed: dict, extras: dict) -> dict:
             chapter_reviews,
         )
 
+    detected_sections = extras.get("detected_sections") or detect_document_sections(parsed)
+    findings_by_section = group_findings_by_section(report)
+    section_audits = build_section_audits(
+        detected_sections,
+        extras.get("structure", {}),
+        content_dashboard.get("section_depth") or [],
+        chapter_reviews,
+        findings_by_section,
+    )
+
     return {
         "icai": report.score,
         "icai_interpretation": interpretation,
@@ -454,6 +469,9 @@ def build_dashboard(report: AuditReport, parsed: dict, extras: dict) -> dict:
         "jury": jury,
         "checklist": checklist,
         "chapter_reviews": chapter_reviews,
+        "detected_sections": detected_sections,
+        "section_audits": section_audits,
+        "findings_by_section": findings_by_section,
         "profile_label": profile_label,
         "formal_dashboard": extras.get("formal_dashboard") or {},
         "integrity_dashboard": extras.get("integrity_dashboard") or {},
@@ -472,6 +490,7 @@ def findings_dataframe_rows(report: AuditReport) -> list[dict]:
         rows.append(
             {
                 "Área": finding.area or finding.module,
+                "Apartado": finding.section_key or "—",
                 "Severidad": severity_label(finding.severity),
                 "Gravedad": gravity_label(finding.severity),
                 "Hallazgo": display_title(finding),

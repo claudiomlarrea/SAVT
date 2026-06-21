@@ -14,6 +14,7 @@ class Finding:
     area: str = ""
     why: str = ""
     how_to_fix: str = ""
+    section_key: str = ""
 
 
 @dataclass

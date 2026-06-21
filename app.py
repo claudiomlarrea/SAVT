@@ -9,8 +9,10 @@ from savt import __app_name__, __version__
 from savt.audit import run_audit
 from savt.audit_config import AuditConfig
 from savt.export_docx import build_report_docx
+from savt.export_xlsx import build_report_xlsx
 from savt.institutional_profiles import PROFILES, profile_options
 from savt.report_builder import findings_dataframe_rows
+from savt.section_audit import section_audit_summary_rows
 from savt.taxonomy import AUDIT_AREAS, SEVERITY_LABELS
 from savt.ui_branding import LOGO_PATH, inject_branding
 from savt.ui_labels import conformance_badge, readiness_conformance_badge
@@ -148,6 +150,106 @@ def render_sidebar(report=None) -> AuditConfig:
         check_formal=check_formal,
         check_content_depth=check_content,
     )
+
+
+def render_detected_sections(dashboard: dict) -> None:
+    """Apartados identificados automáticamente en el documento cargado."""
+    detected = dashboard.get("detected_sections") or []
+    st.markdown("## Apartados detectados en el documento")
+    st.caption(
+        "SAVT reconoce primero la estructura real del archivo (encabezados, capítulos o secciones "
+        "canónicas) y luego audita cada bloque por separado."
+    )
+    if not detected:
+        st.warning("No se identificaron apartados canónicos con contenido suficiente.")
+        return
+
+    rows = [
+        {
+            "N°": item.get("order", idx),
+            "Apartado canónico": item.get("title", "—"),
+            "Detectado como": item.get("detected_as", "—"),
+            "Palabras": item.get("words", 0),
+            "% del cuerpo": item.get("percent_label", "—"),
+        }
+        for idx, item in enumerate(detected, start=1)
+    ]
+    st.dataframe(rows, use_container_width=True, hide_index=True)
+    total_words = sum(item.get("words", 0) for item in detected)
+    st.caption(f"Total clasificado en apartados: **{total_words:,}** palabras en **{len(detected)}** bloques.")
+
+
+def render_section_by_section_audit(dashboard: dict) -> None:
+    """Revisión exhaustiva apartado por apartado con métricas y hallazgos."""
+    from savt.chapter_reviews import CHECK_LABELS
+
+    section_audits = dashboard.get("section_audits") or []
+    if not section_audits:
+        return
+
+    st.markdown("## Revisión por apartado")
+    st.caption(
+        "Cada apartado detectado se evalúa en extensión, citas, profundidad, checklist estructural "
+        "y hallazgos asociados."
+    )
+
+    summary_rows = section_audit_summary_rows(section_audits)
+    st.dataframe(summary_rows, use_container_width=True, hide_index=True)
+
+    for audit in section_audits:
+        ok = audit.get("review_ok")
+        partial = audit.get("review_partial", False)
+        badge_ok = ok is True
+        title = audit.get("title", "Apartado")
+        detected = audit.get("detected_as", "—")
+        with st.expander(
+            f"{conformance_badge(badge_ok, partial and not badge_ok)} {title} — {detected}",
+            expanded=partial or ok is False,
+        ):
+            m1, m2, m3, m4, m5 = st.columns(5)
+            with m1:
+                st.metric("Palabras", f"{audit.get('words', 0):,}")
+            with m2:
+                st.metric("% cuerpo", audit.get("percent_label", "—"))
+            with m3:
+                st.metric("Citas", audit.get("citation_count", 0))
+            with m4:
+                st.metric("Marcadores críticos", audit.get("critical_markers", 0))
+            with m5:
+                st.metric("Hallazgos", audit.get("findings_count", 0))
+
+            st.markdown(f"**Estado:** {audit.get('conformance', '—')} · **Profundidad:** {audit.get('depth_label', '—')}")
+            if audit.get("depth_reason"):
+                st.caption(audit["depth_reason"])
+            if audit.get("review_summary"):
+                st.write(audit["review_summary"])
+
+            checks = audit.get("checks") or []
+            if checks:
+                st.markdown("**Checklist estructural**")
+                for check in checks:
+                    st.markdown(
+                        f"{conformance_badge(bool(check.get('ok')))} — "
+                        f"{CHECK_LABELS.get(check.get('label', ''), check.get('label', ''))}",
+                        unsafe_allow_html=True,
+                    )
+
+            missing = (audit.get("missing") or []) + (audit.get("partial_items") or [])
+            if missing:
+                st.markdown("**Qué falta o no está claro**")
+                for label in missing:
+                    st.markdown(f"- {CHECK_LABELS.get(label, label)}")
+
+            if audit.get("why"):
+                st.markdown(f"**Por qué importa:** {audit['why']}")
+            if audit.get("how_to_fix"):
+                st.info(f"**Cómo corregir:** {audit['how_to_fix']}")
+
+            findings = audit.get("findings") or []
+            if findings:
+                st.markdown("**Hallazgos en este apartado**")
+                for item in findings:
+                    st.markdown(f"- **{item.get('title', '')}** — {item.get('detail', '')[:200]}")
 
 
 def render_verdict(dashboard: dict) -> None:
@@ -539,7 +641,7 @@ def render_document_data(dashboard: dict, report) -> None:
     if content.get("bibliography_words"):
         st.caption(f"Bibliografía: {content['bibliography_words']:,} palabras.")
 
-    sections = content.get("sections") or []
+    sections = content.get("sections") or dashboard.get("detected_sections") or []
     if sections:
         st.markdown("### Estructura del documento")
         st.caption(help_text.get("sections", ""))
@@ -689,25 +791,34 @@ def render_findings_table(report) -> None:
 def render_final_report(report, dashboard: dict, base_name: str) -> None:
     st.markdown("## Informe final SAVT")
     st.caption(
-        "Descargue el informe completo o explore el detalle tabular de hallazgos y referencias."
+        "Descargue el informe completo en Excel o Word, o explore el detalle tabular de hallazgos."
     )
     render_findings_table(report)
     render_bibliography_table(report)
 
-    col_csv, col_docx = st.columns(2)
+    col_csv, col_xlsx, col_docx = st.columns(3)
     csv = pd.DataFrame(findings_dataframe_rows(report)).to_csv(index=False).encode("utf-8")
     with col_csv:
         st.download_button(
-            "Descargar informe CSV",
+            "Descargar CSV (hallazgos)",
             data=csv,
             file_name=f"informe_savt_{base_name}.csv",
             mime="text/csv",
             use_container_width=True,
         )
+    with col_xlsx:
+        xlsx_bytes = build_report_xlsx(report, dashboard)
+        st.download_button(
+            "Descargar Excel (.xlsx)",
+            data=xlsx_bytes,
+            file_name=f"informe_savt_{base_name}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True,
+        )
     with col_docx:
         docx_bytes = build_report_docx(report, dashboard)
         st.download_button(
-            "Descargar informe Word (.docx)",
+            "Descargar Word (.docx)",
             data=docx_bytes,
             file_name=f"informe_savt_{base_name}.docx",
             mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -777,12 +888,36 @@ def main() -> None:
         return
 
     if st.button("Ejecutar auditoría", type="primary", use_container_width=True):
+        progress_bar = st.progress(0.0)
+        status_box = st.empty()
+        preview_box = st.empty()
+
+        def on_progress(phase: str, detail: str, fraction: float, payload: dict | None = None) -> None:
+            progress_bar.progress(min(max(fraction, 0.0), 1.0))
+            status_box.markdown(f"**{phase}** — {detail}")
+            if payload and payload.get("detected_sections"):
+                preview_box.markdown("#### Apartados detectados hasta el momento")
+                preview_rows = [
+                    {
+                        "Apartado": s.get("title"),
+                        "Detectado como": s.get("detected_as"),
+                        "Palabras": s.get("words"),
+                        "%": s.get("percent_label"),
+                    }
+                    for s in payload["detected_sections"]
+                ]
+                preview_box.dataframe(preview_rows, use_container_width=True, hide_index=True)
+
         with st.spinner("Analizando tesis…"):
             report = run_audit(
                 io.BytesIO(uploaded.getvalue()),
                 filename=uploaded.name,
                 config=config,
+                on_progress=on_progress,
             )
+        progress_bar.progress(1.0)
+        status_box.success("Auditoría completada.")
+        preview_box.empty()
         st.session_state["report"] = report
         st.session_state["profile_id"] = config.profile_id
         st.rerun()
@@ -798,6 +933,10 @@ def main() -> None:
 
     base_name = uploaded.name.rsplit(".", 1)[0]
 
+    render_detected_sections(dashboard)
+    st.divider()
+    render_section_by_section_audit(dashboard)
+    st.divider()
     render_document_data(dashboard, report)
     st.divider()
     render_verdict(dashboard)

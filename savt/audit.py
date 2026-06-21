@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Callable, Optional
+
 from savt.audit_config import AuditConfig
 from savt.bibliography_analysis import build_bibliography_details
 from savt.citations import audit_citations
@@ -21,6 +23,19 @@ from savt.style import audit_style
 from savt.tables import analyze_tables
 from savt.taxonomy import enrich_finding
 
+AuditProgressCallback = Callable[[str, str, float, Optional[dict]], None]
+
+
+def _emit_progress(
+    callback: AuditProgressCallback | None,
+    phase: str,
+    detail: str,
+    fraction: float,
+    payload: Optional[dict] = None,
+) -> None:
+    if callback:
+        callback(phase, detail, fraction, payload)
+
 
 def run_audit(
     source,
@@ -28,6 +43,7 @@ def run_audit(
     verify_references_online: bool = True,
     max_doi_checks: int = 25,
     config: AuditConfig | None = None,
+    on_progress: Optional[AuditProgressCallback] = None,
 ) -> AuditReport:
     if config is None:
         config = AuditConfig(
@@ -40,9 +56,27 @@ def run_audit(
 
     parsed = parse_thesis_file(source, filename=filename)
     config.resolve_for_document(parsed.get("full_text", ""), parsed.get("page_estimate", 0))
+
+    from savt.section_audit import detect_document_sections
+
+    detected_sections = detect_document_sections(parsed)
+    _emit_progress(
+        on_progress,
+        "Detección de apartados",
+        f"{len(detected_sections)} apartados identificados en el documento",
+        0.08,
+        {"detected_sections": detected_sections},
+    )
+
     findings = []
 
     structure_findings, structure_dashboard = audit_structure(parsed)
+    _emit_progress(
+        on_progress,
+        "Estructura",
+        "Revisando introducción, marco, metodología, resultados, discusión y conclusiones",
+        0.22,
+    )
     question_findings, question_dashboard = audit_research_question(parsed)
     objective_findings, objectives_evaluation = audit_objectives_coherence(parsed)
     figure_details, figure_findings = analyze_figures(parsed["body"])
@@ -52,6 +86,13 @@ def run_audit(
     integrity_findings, integrity_dashboard = audit_integrity(config)
     ethics_findings, ethics_dashboard = audit_ethics(parsed, config)
     content_findings, content_dashboard = audit_content_quality(parsed, config)
+    _emit_progress(
+        on_progress,
+        "Profundidad académica",
+        "Calculando palabras, citas y profundidad por apartado",
+        0.42,
+        {"detected_sections": detected_sections},
+    )
     originality_findings, originality_dashboard = audit_originality(parsed, config)
 
     findings.extend(audit_citations(parsed))
@@ -69,6 +110,12 @@ def run_audit(
     findings.extend(audit_style(parsed, config))
     findings.extend(audit_similarity(parsed))
 
+    _emit_progress(
+        on_progress,
+        "Bibliografía y citas",
+        "Verificando correspondencia citas ↔ referencias",
+        0.62,
+    )
     bib_details, bib_findings = build_bibliography_details(
         parsed,
         parsed["bibliography"],
@@ -77,8 +124,15 @@ def run_audit(
     )
     findings.extend(bib_findings)
 
+    from savt.section_audit import tag_findings_with_sections
+
     for finding in findings:
         enrich_finding(finding)
+    tag_findings_with_sections(
+        AuditReport(filename=filename, word_count=0, page_estimate=0, findings=findings)
+    )
+
+    _emit_progress(on_progress, "Informe final", "Consolidando resultados y checklist", 0.88)
 
     report = AuditReport(
         filename=filename,
@@ -117,6 +171,14 @@ def run_audit(
         "content_dashboard": content_dashboard,
         "originality_dashboard": originality_dashboard,
         "config": config,
+        "detected_sections": detected_sections,
     }
     report.metadata["dashboard"] = build_dashboard(report, parsed, extras)
+    _emit_progress(
+        on_progress,
+        "Completado",
+        f"Auditoría finalizada — ICAI {report.score}/100",
+        1.0,
+        {"detected_sections": detected_sections, "section_audits": report.metadata["dashboard"].get("section_audits")},
+    )
     return report
