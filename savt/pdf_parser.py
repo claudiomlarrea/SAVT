@@ -44,7 +44,10 @@ def remove_pdf_toc_lines(text: str) -> str:
 
 
 def remove_pdf_front_matter(body: str) -> str:
+    """Recorta portada, índice y metadatos previos al inicio del cuerpo argumental."""
     markers = [
+        # PDF: el encabezado suele ir en la misma línea que el primer párrafo.
+        r"(?im)(?:^|\n)\s*INTRODUCCI[ÓO]N\b",
         r"1\.\s+Planteamiento general\s*\n",
         r"1\.1\s+Presentaci[oó]n del tema\s*\n",
         r"CAPÍTULO I\.\s*INTRODUCCIÓN\s*\n",
@@ -56,9 +59,13 @@ def remove_pdf_front_matter(body: str) -> str:
         match = re.search(pattern, body, re.IGNORECASE)
         if match:
             return body[match.start() :].strip()
-    question = re.search(r"¿[^?]+\?", body, re.DOTALL)
-    if question and question.start() > 500:
-        return body[question.start() - 400 :].strip()
+    for pattern in (
+        r"(?im)(?:^|\n)\s*2\.\s*Pregunta de investigaci",
+        r"(?im)(?:^|\n)\s*1\.\s+[A-ZÁÉÍÓÚÑ]",
+    ):
+        match = re.search(pattern, body)
+        if match and match.start() > 800:
+            return body[match.start() :].strip()
     return body
 
 

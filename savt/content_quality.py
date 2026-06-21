@@ -5,7 +5,7 @@ import re
 from savt.audit_config import AuditConfig
 from savt.document_sections import extract_section, get_section_map
 from savt.models import Finding
-from savt.word_stats import CANONICAL_SECTION_ORDER, build_word_statistics, count_words
+from savt.word_stats import CANONICAL_SECTION_ORDER, build_word_statistics, count_words, get_section_word_partition
 
 CRITICAL_MARKERS = [
     "sin embargo",
@@ -45,6 +45,7 @@ ROLE_DEPTH_RULES: dict[str, dict] = {
     "presentacion": {"min_words": 80},
     "introduccion": {"min_words": 120, "min_density": 0.2},
     "objetivos": {"min_words": 50},
+    "analisis_bibliometrico": {"min_words": 400, "min_density": 0.3},
     "marco_teorico": {"min_words": 800, "min_density": 1.0, "min_critical": 2},
     "metodologia": {"min_words": 350, "min_density": 0.2},
     "resultados": {"min_words": 250, "min_result_markers": 2},
@@ -136,12 +137,7 @@ def _assess_section_depth(role: str, metrics: dict) -> str:
 
 
 def build_section_depth_analysis(parsed: dict) -> list[dict]:
-    body = parsed.get("body", "")
-    role_texts = dict(parsed.get("section_map") or get_section_map(body))
-    section_meta = parsed.get("section_meta") or {}
-    marco_fallback = _marco_text(parsed)
-    if len(marco_fallback) > len(role_texts.get("marco_teorico", "")):
-        role_texts["marco_teorico"] = marco_fallback
+    role_texts, section_meta = get_section_word_partition(parsed)
 
     rows: list[dict] = []
 
@@ -213,9 +209,9 @@ def audit_content_quality(parsed: dict, config: AuditConfig) -> tuple[list[Findi
             ),
             "bibliography_words": "Palabras detectadas en la sección de bibliografía/referencias.",
             "sections": (
-                "Total de palabras por apartado canónico (presentación, marco teórico, "
-                "metodología, resultados, etc.). Cada fila suma todo el contenido detectado "
-                "bajo ese rol, sin listar subsecciones."
+                "Total de palabras por apartado canónico. Cada fila corresponde a un tramo "
+                "exclusivo del documento (sin doble conteo). La presentación/resumen proviene "
+                "del abstract detectado; el resto se delimita por encabezados reales del PDF."
             ),
             "section_depth": (
                 "Indicadores de profundidad académica por apartado canónico: extensión, "

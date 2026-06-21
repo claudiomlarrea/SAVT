@@ -29,6 +29,12 @@ CANONICAL_ROLES: dict[str, tuple[str, ...]] = {
         "planteamiento",
         "encuadre del problema",
     ),
+    "analisis_bibliometrico": (
+        "análisis bibliométrico",
+        "analisis bibliometrico",
+        "estudio bibliométrico",
+        "estudio bibliometrico",
+    ),
     "marco_teorico": (
         "marco teórico",
         "marco teorico",
@@ -46,8 +52,6 @@ CANONICAL_ROLES: dict[str, tuple[str, ...]] = {
         "encuadre teórico",
         "encuadre teorico",
         "marco de referencia",
-        "análisis bibliométrico",
-        "analisis bibliometrico",
         "bases teóricas",
         "bases teoricas",
     ),
@@ -273,7 +277,7 @@ _MAJOR_INLINE_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = tuple(
         (
             "marco_teorico",
             r"(?:^|\n)\s*(?:MARCO TE[OÓ]RICO|MARCO CONCEPTUAL|FUNDAMENTACI[ÓO]N TE[OÓ]RICA|"
-            r"REVISI[ÓO]N(?:\s+DE\s+LITERATURA|\s+BIBLIOGR[AÁ]FICA)?|AN[ÁA]LISIS BIBLIOM[EÉ]TRICO|"
+            r"REVISI[ÓO]N(?:\s+DE\s+LITERATURA|\s+BIBLIOGR[AÁ]FICA)?|"
             r"ESTADO DEL ARTE|ANTECEDENTES)\b",
         ),
         (
@@ -303,20 +307,31 @@ def _scan_major_section_spans(body: str) -> list[tuple[int, str, str]]:
     hits: list[tuple[int, str, str]] = []
 
     marco_patterns = [
-        (r"(?:^|\n)\s*MARCO TE[OÓ]RICO\b", "MARCO TEÓRICO"),
-        (r"(?:^|\n)\s*MARCO CONCEPTUAL\b", "MARCO CONCEPTUAL"),
-        (r"(?:^|\n)\s*FUNDAMENTACI[ÓO]N TE[OÓ]RICA\b", "FUNDAMENTACIÓN TEÓRICA"),
-        (r"(?:^|\n)\s*REVISI[ÓO]N(?:\s+DE\s+LITERATURA|\s+BIBLIOGR[AÁ]FICA)\b", "REVISIÓN DE LITERATURA"),
-        (r"(?:^|\n)\s*AN[ÁA]LISIS BIBLIOM[EÉ]TRICO\b", "ANÁLISIS BIBLIOMÉTRICO"),
+        (r"(?:^|\n)\s*MARCO TE[OÓ]RICO\b", "marco_teorico", "MARCO TEÓRICO"),
+        (r"(?:^|\n)\s*MARCO CONCEPTUAL\b", "marco_teorico", "MARCO CONCEPTUAL"),
+        (r"(?:^|\n)\s*FUNDAMENTACI[ÓO]N TE[OÓ]RICA\b", "marco_teorico", "FUNDAMENTACIÓN TEÓRICA"),
+        (
+            r"(?:^|\n)\s*REVISI[ÓO]N(?:\s+DE\s+LITERATURA|\s+BIBLIOGR[AÁ]FICA)\b",
+            "marco_teorico",
+            "REVISIÓN DE LITERATURA",
+        ),
     ]
-    for pattern, label in marco_patterns:
+    for pattern, role, label in marco_patterns:
         match = re.search(pattern, body, re.IGNORECASE | re.MULTILINE)
         if match:
-            hits.append((match.start(), "marco_teorico", label))
+            hits.append((match.start(), role, label))
             break
 
+    biblio_match = re.search(
+        r"(?:^|\n)\s*AN[ÁA]LISIS BIBLIOM[EÉ]TRICO\b",
+        body,
+        re.IGNORECASE | re.MULTILINE,
+    )
+    if biblio_match:
+        hits.append((biblio_match.start(), "analisis_bibliometrico", "ANÁLISIS BIBLIOMÉTRICO"))
+
     for role, pattern in _MAJOR_INLINE_PATTERNS:
-        if role == "marco_teorico":
+        if role in {"marco_teorico", "analisis_bibliometrico"}:
             continue
         match = pattern.search(body)
         if not match:
@@ -489,3 +504,112 @@ def build_enriched_section_map(
             meta[role]["detected_titles"] = ["Detectado por contenido"]
 
     return merged, meta
+
+
+def _first_match_start(body: str, pattern: str) -> int | None:
+    match = re.search(pattern, body, re.IGNORECASE | re.MULTILINE)
+    return match.start() if match else None
+
+
+def build_non_overlapping_word_partition(body: str) -> tuple[dict[str, str], dict[str, dict]]:
+    """
+    Parte el cuerpo en tramos mutuamente excluyentes (sin doble conteo).
+    Cada carácter del body pertenece como máximo a un rol canónico.
+    """
+    if not body.strip():
+        return {}, {}
+
+    pos_pregunta = _first_match_start(
+        body, r"(?im)(?:^|\n)\s*\d+\.?\s*Pregunta de investigaci"
+    )
+    pos_objetivos_block = _first_match_start(
+        body,
+        r"(?im)(?:^|\n)\s*PREGUNTA DE INVESTIGACI[ÓO]N,\s*OBJETIVOS E HIP[ÓO]TESIS",
+    )
+    if pos_objetivos_block is not None and (
+        pos_pregunta is None or pos_objetivos_block < pos_pregunta
+    ):
+        pos_pregunta = pos_objetivos_block
+    pos_objetivos = _first_match_start(
+        body, r"(?im)(?:^|\n)\s*\d+\.?\s*Objetivo general"
+    )
+    pos_biblio = _first_match_start(body, r"(?im)(?:^|\n)\s*AN[ÁA]LISIS BIBLIOM[EÉ]TRICO")
+    pos_marco = _first_match_start(body, r"(?im)(?:^|\n)\s*MARCO TE[OÓ]RICO\b")
+    if pos_marco is None:
+        pos_marco = _first_match_start(body, r"(?im)(?:^|\n)\s*MARCO CONCEPTUAL\b")
+    if pos_marco is None:
+        pos_marco = _first_match_start(
+            body,
+            r"(?im)(?:^|\n)\s*REVISI[ÓO]N(?:\s+DE\s+LITERATURA|\s+BIBLIOGR[AÁ]FICA)\b",
+        )
+    pos_metod = _first_match_start(body, r"(?im)(?:^|\n)\s*METODOLOG[IÍ]A\b")
+    pos_resultados = _first_match_start(body, r"(?im)(?:^|\n)\s*RESULTADOS\b")
+    pos_discusion = _first_match_start(body, r"(?im)(?:^|\n)\s*DISCUSI[ÓO]N\b")
+    pos_conclusiones = _first_match_start(
+        body, r"(?im)(?:^|\n)\s*CONCLUSIONES(?:\s+GENERALES|\s+FINALES)?\b"
+    )
+
+    major: list[tuple[int, str, str]] = []
+    for pos, role, title in (
+        (pos_biblio, "analisis_bibliometrico", "Análisis bibliométrico"),
+        (pos_marco, "marco_teorico", "Marco teórico"),
+        (pos_metod, "metodologia", "Metodología"),
+        (pos_resultados, "resultados", "Resultados"),
+        (pos_discusion, "discusion", "Discusión"),
+        (pos_conclusiones, "conclusiones", "Conclusiones"),
+    ):
+        if pos is not None:
+            major.append((pos, role, title))
+    major.sort(key=lambda item: item[0])
+
+    first_major = major[0][0] if major else len(body)
+    obj_end = pos_biblio if pos_biblio is not None and pos_biblio <= first_major else first_major
+    if pos_marco is not None and pos_biblio is None and pos_marco <= first_major:
+        obj_end = pos_marco
+
+    sections: dict[str, str] = {}
+    meta: dict[str, dict] = {}
+
+    if pos_pregunta is not None and pos_pregunta < first_major:
+        intro = body[:pos_pregunta].strip()
+        if intro:
+            sections["introduccion"] = intro
+            meta["introduccion"] = {"detected_titles": ["Introducción"]}
+        obj_block = body[pos_pregunta:obj_end].strip()
+        if obj_block:
+            sections["objetivos"] = obj_block
+            if pos_objetivos_block is not None and pos_pregunta == pos_objetivos_block:
+                meta["objetivos"] = {
+                    "detected_titles": ["Pregunta de investigación, objetivos e hipótesis"]
+                }
+            else:
+                meta["objetivos"] = {"detected_titles": ["Pregunta, objetivos e hipótesis"]}
+    elif pos_objetivos is not None and pos_objetivos < first_major:
+        intro = body[:pos_objetivos].strip()
+        if intro:
+            sections["introduccion"] = intro
+            meta["introduccion"] = {"detected_titles": ["Introducción"]}
+        obj_block = body[pos_objetivos:obj_end].strip()
+        if obj_block:
+            sections["objetivos"] = obj_block
+            meta["objetivos"] = {"detected_titles": ["Objetivos"]}
+    else:
+        intro = body[:first_major].strip()
+        if intro:
+            sections["introduccion"] = intro
+            if re.search(r"(?im)\bINTRODUCCI[ÓO]N\b", intro[:300]):
+                meta["introduccion"] = {"detected_titles": ["Introducción"]}
+            else:
+                meta["introduccion"] = {
+                    "detected_titles": ["Introducción (planteamiento y pregunta de investigación)"]
+                }
+
+    for idx, (pos, role, title) in enumerate(major):
+        next_pos = major[idx + 1][0] if idx + 1 < len(major) else len(body)
+        chunk = body[pos:next_pos].strip()
+        if _word_count(chunk) < 20:
+            continue
+        sections[role] = chunk
+        meta[role] = {"detected_titles": [title]}
+
+    return sections, meta

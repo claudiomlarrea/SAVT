@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import re
 
-from savt.document_sections import get_section_map
+from savt.document_sections import extract_abstract
+from savt.section_resolver import build_non_overlapping_word_partition
 
 
 def count_words(text: str) -> int:
@@ -15,8 +16,9 @@ def count_words(text: str) -> int:
 CANONICAL_SECTION_ORDER: tuple[tuple[str, str], ...] = (
     ("presentacion", "Presentación / resumen"),
     ("introduccion", "Introducción"),
-    ("objetivos", "Objetivos"),
-    ("marco_teorico", "Marco teórico y estado del arte"),
+    ("objetivos", "Pregunta, objetivos e hipótesis"),
+    ("analisis_bibliometrico", "Análisis bibliométrico"),
+    ("marco_teorico", "Marco teórico"),
     ("metodologia", "Metodología"),
     ("resultados", "Resultados"),
     ("discusion", "Discusión"),
@@ -24,16 +26,31 @@ CANONICAL_SECTION_ORDER: tuple[tuple[str, str], ...] = (
 )
 
 
-def _canonical_word_map(parsed: dict) -> dict[str, str]:
+def _partition_word_map(parsed: dict) -> tuple[dict[str, str], dict[str, dict]]:
     body = parsed.get("body", "")
-    return parsed.get("section_map") or get_section_map(body)
+    partition, meta = build_non_overlapping_word_partition(body)
+
+    full_text = parsed.get("full_text", "")
+    if full_text:
+        abstract_text, _abstract_words, abstract_kind = extract_abstract(full_text)
+        if abstract_text and count_words(abstract_text) >= 40:
+            partition["presentacion"] = abstract_text
+            label = "Resumen" if abstract_kind == "resumen" else "Presentación / resumen"
+            meta["presentacion"] = {"detected_titles": [label]}
+
+    return partition, meta
+
+
+def get_section_word_partition(parsed: dict) -> tuple[dict[str, str], dict[str, dict]]:
+    """Mapa de apartados sin solapamiento para conteo y profundidad académica."""
+    return _partition_word_map(parsed)
 
 
 def build_word_statistics(parsed: dict) -> dict:
     body = parsed.get("body", "")
     total_body = parsed.get("word_count") or count_words(body)
     bib_words = parsed.get("bibliography_word_count", 0)
-    role_texts = _canonical_word_map(parsed)
+    role_texts, _meta = _partition_word_map(parsed)
 
     sections: list[dict] = []
     classified_words = 0
@@ -43,7 +60,8 @@ def build_word_statistics(parsed: dict) -> dict:
         words = count_words(text)
         if words <= 0:
             continue
-        classified_words += words
+        if role != "presentacion":
+            classified_words += words
         sections.append(
             {
                 "title": label,
@@ -75,4 +93,5 @@ def build_word_statistics(parsed: dict) -> dict:
         "bibliography_words": bib_words,
         "sections": sections,
         "classified_body_words": classified_words,
+        "section_partition_meta": _meta,
     }
