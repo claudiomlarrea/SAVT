@@ -60,6 +60,19 @@ DEPTH_STATUS_LABELS = {
     "missing": "No detectado",
 }
 
+_DEPTH_RANK = {"missing": 0, "weak": 1, "partial": 2, "adequate": 3}
+
+# Roles de profundidad alineados con el checklist de presentación.
+CHECKLIST_ALIGNED_ROLES: dict[str, str] = {
+    "introduccion": "introduccion",
+    "objetivos": "objetivos",
+    "marco_teorico": "marco_teorico",
+    "metodologia": "metodologia",
+    "resultados": "resultados",
+    "discusion": "discusion",
+    "conclusiones": "conclusiones",
+}
+
 
 def _count_citations(text: str) -> int:
     cites = len(re.findall(r"\(\d+(?:[,\s\-–]\d+)*\)", text))
@@ -218,6 +231,71 @@ def build_section_depth_analysis(parsed: dict) -> list[dict]:
     return rows
 
 
+def _checklist_depth_status(review: dict) -> str | None:
+    """Traduce el checklist estructural a un estado de profundidad equivalente."""
+    status = review.get("status")
+    if status == "fail":
+        return "weak"
+    if status == "partial":
+        return "partial"
+    if status == "ok":
+        return "adequate"
+    return None
+
+
+def _checklist_depth_reason(review: dict) -> str:
+    from savt.chapter_reviews import CHECK_LABELS
+
+    missing = list(review.get("missing") or []) + list(review.get("partial_items") or [])
+    if missing:
+        labels = [CHECK_LABELS.get(item, item) for item in missing[:3]]
+        return f"Checklist: falta o no está claro — {', '.join(labels)}."
+    summary = (review.get("summary") or "").strip()
+    if summary and summary != "El apartado cumple los criterios detectados automáticamente.":
+        return summary
+    return ""
+
+
+def reconcile_section_depth_with_reviews(
+    section_depth: list[dict],
+    chapter_reviews: list[dict],
+) -> list[dict]:
+    """
+    Alinea profundidad académica con el checklist de presentación.
+    Si el checklist marca un apartado como no conforme, la profundidad no puede ser «Conforme».
+    """
+    reviews_by_key = {review["key"]: review for review in chapter_reviews}
+    reconciled: list[dict] = []
+
+    for row in section_depth:
+        item = dict(row)
+        review_key = CHECKLIST_ALIGNED_ROLES.get(item.get("role", ""))
+        if not review_key:
+            reconciled.append(item)
+            continue
+
+        review = reviews_by_key.get(review_key)
+        checklist_status = _checklist_depth_status(review) if review else None
+        if not checklist_status:
+            reconciled.append(item)
+            continue
+
+        metrics_status = item.get("depth_status", "missing")
+        if _DEPTH_RANK[checklist_status] < _DEPTH_RANK.get(metrics_status, 3):
+            item["depth_status"] = checklist_status
+            item["depth_label"] = DEPTH_STATUS_LABELS[checklist_status]
+            checklist_reason = _checklist_depth_reason(review)
+            if checklist_reason:
+                item["depth_reason"] = checklist_reason
+            item["aligned_with_checklist"] = True
+        else:
+            item["aligned_with_checklist"] = metrics_status == checklist_status
+
+        reconciled.append(item)
+
+    return reconciled
+
+
 def _marco_text(parsed: dict) -> str:
     section_map = parsed.get("section_map") or get_section_map(parsed.get("body", ""))
     marco = section_map.get("marco_teorico", "")
@@ -265,8 +343,9 @@ def audit_content_quality(parsed: dict, config: AuditConfig) -> tuple[list[Findi
             "section_depth": (
                 "Indicadores de profundidad académica por apartado canónico: extensión, "
                 "cantidad de citas bibliográficas detectadas, marcadores de análisis crítico e "
-                "indicadores de presentación de hallazgos (en resultados). La columna "
-                "«Detectado como» muestra el encabezado real encontrado en el documento."
+                "indicadores de presentación de hallazgos (en resultados). El estado «Profundidad» "
+                "se alinea con el checklist de presentación: si el checklist marca un apartado "
+                "como no conforme, aquí tampoco aparecerá como conforme."
             ),
             "marco_word_count": (
                 "Palabras en marco teórico / revisión bibliográfica (rol canónico). "

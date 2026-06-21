@@ -7,6 +7,7 @@ from savt.chapter_reviews import (
     checklist_status_from_reviews,
     readiness_conformance_label,
 )
+from savt.content_quality import reconcile_section_depth_with_reviews
 from savt.models import AuditReport, Finding
 from savt.taxonomy import enrich_finding, icao_interpretation, presentation_status, severity_label
 
@@ -426,6 +427,13 @@ def build_dashboard(report: AuditReport, parsed: dict, extras: dict) -> dict:
     config = extras.get("config")
     profile_label = report.metadata.get("profile_label", "—")
 
+    content_dashboard = dict(extras.get("content_dashboard") or {})
+    if content_dashboard.get("section_depth"):
+        content_dashboard["section_depth"] = reconcile_section_depth_with_reviews(
+            content_dashboard["section_depth"],
+            chapter_reviews,
+        )
+
     return {
         "icai": report.score,
         "icai_interpretation": interpretation,
@@ -450,7 +458,7 @@ def build_dashboard(report: AuditReport, parsed: dict, extras: dict) -> dict:
         "formal_dashboard": extras.get("formal_dashboard") or {},
         "integrity_dashboard": extras.get("integrity_dashboard") or {},
         "ethics_dashboard": extras.get("ethics_dashboard") or {},
-        "content_dashboard": extras.get("content_dashboard") or {},
+        "content_dashboard": content_dashboard,
         "originality_dashboard": extras.get("originality_dashboard") or {},
     }
 
