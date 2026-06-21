@@ -202,13 +202,19 @@ def build_report_docx(report: AuditReport, dashboard: dict) -> bytes:
     checklist = dashboard.get("checklist", {})
     _add_label_paragraph(doc, "Estado del checklist", checklist.get("status", "—"))
     for item in checklist.get("items", []):
-        mark = "Conforme" if item.get("ok") else "Requiere revisión"
+        if item.get("ok"):
+            mark = "Conforme"
+        elif item.get("partial"):
+            mark = "Parcialmente conforme"
+        else:
+            mark = "No conforme"
         _add_bullet(doc, f"{item['label']} — {mark}")
-        if not item.get("ok"):
-            if item.get("summary"):
-                _add_bullet(doc, item["summary"])
-            for label in item.get("missing") or []:
-                _add_bullet(doc, CHECK_LABELS.get(label, label), bold_prefix="•")
+    pending_reviews = [r for r in dashboard.get("chapter_reviews") or [] if not r.get("ok")]
+    if pending_reviews:
+        doc.add_paragraph(
+            "El detalle de qué falta, por qué importa y cómo corregir figura en "
+            "«Apartados con observaciones» (sección 9)."
+        )
 
     _add_heading(doc, "3. Advertencias detectadas", 1)
     warnings = dashboard.get("warnings_list") or []

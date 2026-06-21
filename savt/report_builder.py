@@ -373,10 +373,6 @@ def build_submission_checklist(chapter_reviews: list[dict]) -> dict:
                 "partial": review.get("partial", False),
                 "warning": not review["ok"],
                 "section_key": review["key"],
-                "summary": review.get("summary", ""),
-                "why": review.get("why", ""),
-                "how_to_fix": review.get("how_to_fix", ""),
-                "missing": review.get("missing", []) + review.get("partial_items", []),
             }
         )
 

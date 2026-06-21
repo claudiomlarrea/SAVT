@@ -186,9 +186,9 @@ def render_verdict(dashboard: dict) -> None:
 
 
 def render_checklist(dashboard: dict) -> None:
-    from savt.chapter_reviews import CHECK_LABELS
-
     checklist = dashboard["checklist"]
+    pending_count = sum(1 for item in checklist["items"] if not item["ok"])
+
     st.markdown("## Checklist de presentación")
     st.markdown(f"**Estado:** {checklist['status']}")
 
@@ -200,19 +200,11 @@ def render_checklist(dashboard: dict) -> None:
             unsafe_allow_html=True,
         )
 
-        if not item["ok"] or item.get("partial"):
-            with st.expander(f"Qué revisar en {item['label'].split(' — ')[0]}", expanded=False):
-                st.write(item.get("summary", ""))
-                missing = item.get("missing") or []
-                if missing:
-                    st.markdown("**Elementos a reforzar:**")
-                    for label in missing:
-                        st.markdown(f"- {CHECK_LABELS.get(label, label)}")
-                if item.get("why"):
-                    st.markdown(f"**Por qué importa:** {item['why']}")
-                if item.get("how_to_fix"):
-                    st.info(f"**Cómo corregir:** {item['how_to_fix']}")
-        st.markdown("")
+    if pending_count:
+        st.caption(
+            "El detalle de qué falta, por qué importa y cómo corregir figura en "
+            "**Apartados con observaciones** (sección siguiente)."
+        )
 
 
 def render_warnings(dashboard: dict) -> None:
