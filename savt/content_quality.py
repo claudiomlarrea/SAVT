@@ -43,7 +43,7 @@ RESULTS_MARKERS = [
 
 ROLE_DEPTH_RULES: dict[str, dict] = {
     "presentacion": {"min_words": 80},
-    "introduccion": {"min_words": 350, "min_density": 0.4},
+    "introduccion": {"min_words": 120, "min_density": 0.2},
     "objetivos": {"min_words": 50},
     "marco_teorico": {"min_words": 800, "min_density": 1.0, "min_critical": 2},
     "metodologia": {"min_words": 350, "min_density": 0.2},
@@ -71,6 +71,7 @@ def _section_metrics(text: str) -> dict:
     if words <= 0:
         return {
             "words": 0,
+            "citation_count": 0,
             "citation_density": 0.0,
             "critical_markers": 0,
             "result_markers": 0,
@@ -78,9 +79,11 @@ def _section_metrics(text: str) -> dict:
     lower = text.lower()
     critical = sum(1 for marker in CRITICAL_MARKERS if marker in lower)
     result_markers = sum(1 for marker in RESULTS_MARKERS if marker in lower)
-    density = round(_count_citations(text) / (words / 100), 2)
+    cites = _count_citations(text)
+    density = round(cites / (words / 100), 2)
     return {
         "words": words,
+        "citation_count": cites,
         "citation_density": density,
         "critical_markers": critical,
         "result_markers": result_markers,
@@ -92,6 +95,18 @@ def _assess_section_depth(role: str, metrics: dict) -> str:
     words = metrics["words"]
     if words <= 0:
         return "missing"
+    if role == "introduccion" and words >= 80:
+        # Apartado sin título explícito pero con planteamiento/pregunta detectable.
+        checks = ["min_words"]
+        passed = 1 if words >= rules.get("min_words", 0) else 0
+        if "min_density" in rules:
+            checks.append("min_density")
+            min_cites = rules["min_density"] * words / 100
+            if metrics["citation_count"] >= min_cites:
+                passed += 1
+        if passed == len(checks):
+            return "adequate"
+        return "partial"
     if words < rules.get("min_words", 100) * 0.5:
         return "weak"
 
@@ -100,7 +115,8 @@ def _assess_section_depth(role: str, metrics: dict) -> str:
 
     if "min_density" in rules:
         checks.append("min_density")
-        if metrics["citation_density"] >= rules["min_density"]:
+        min_cites = rules["min_density"] * words / 100
+        if metrics["citation_count"] >= min_cites:
             passed += 1
     if "min_critical" in rules:
         checks.append("min_critical")
@@ -122,6 +138,7 @@ def _assess_section_depth(role: str, metrics: dict) -> str:
 def build_section_depth_analysis(parsed: dict) -> list[dict]:
     body = parsed.get("body", "")
     role_texts = dict(parsed.get("section_map") or get_section_map(body))
+    section_meta = parsed.get("section_meta") or {}
     marco_fallback = _marco_text(parsed)
     if len(marco_fallback) > len(role_texts.get("marco_teorico", "")):
         role_texts["marco_teorico"] = marco_fallback
@@ -132,10 +149,19 @@ def build_section_depth_analysis(parsed: dict) -> list[dict]:
         text = role_texts.get(role, "")
         metrics = _section_metrics(text)
         depth_status = _assess_section_depth(role, metrics)
+        detected = section_meta.get(role, {}).get("detected_titles") or []
+        if metrics["words"] <= 0 and depth_status == "missing":
+            detected_label = "—"
+        elif detected:
+            detected_label = "; ".join(detected[:2])
+        else:
+            detected_label = "Detectado por contenido"
         row = {
             "role": role,
             "title": label,
+            "detected_as": detected_label,
             "words": metrics["words"],
+            "citation_count": metrics["citation_count"],
             "citation_density": metrics["citation_density"],
             "critical_markers": metrics["critical_markers"],
             "result_markers": metrics["result_markers"],
@@ -193,9 +219,9 @@ def audit_content_quality(parsed: dict, config: AuditConfig) -> tuple[list[Findi
             ),
             "section_depth": (
                 "Indicadores de profundidad académica por apartado canónico: extensión, "
-                "densidad de citas cada 100 palabras, marcadores de análisis crítico e "
+                "cantidad de citas bibliográficas detectadas, marcadores de análisis crítico e "
                 "indicadores de presentación de hallazgos (en resultados). La columna "
-                "Profundidad resume si el apartado alcanza expectativas heurísticas para su rol."
+                "«Detectado como» muestra el encabezado real encontrado en el documento."
             ),
             "marco_word_count": (
                 "Palabras en marco teórico / revisión bibliográfica (rol canónico). "

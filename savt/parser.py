@@ -272,16 +272,30 @@ def extract_objectives(body: str) -> list[str]:
 
 
 def extract_conclusions(body: str) -> str:
+    bib = re.search(r"(?im)\nBIBLIOGRAF[IÍ]A\b", body)
+    scope = body[: bib.start()] if bib else body
+
+    inline_matches = list(
+        re.finditer(
+            r"(?im)(?:^|\n)\s*CONCLUSIONES(?:\s+GENERALES|\s+FINALES)?\b\s*",
+            scope,
+        )
+    )
+    for match in reversed(inline_matches):
+        text = scope[match.end() :].strip()
+        if count_words(text) > 150:
+            return text
+
     headings = list(
         re.finditer(
             r"CAPÍTULO VI\.?\s*CONCLUSIONES(?:\d+)?\s*",
-            body,
+            scope,
             re.IGNORECASE,
         )
     )
     for heading in reversed(headings):
         start = heading.end()
-        tail = body[start:]
+        tail = scope[start:]
         end = re.search(r"BIBLIOGRAFÍA", tail, re.IGNORECASE)
         text = tail[: end.start()] if end else tail
         text = text.strip()
@@ -293,22 +307,17 @@ def extract_conclusions(body: str) -> str:
         r"(?m)^CONCLUSIONES(?:\s+GENERALES)?\s*\n(.+?)(?:\nBIBLIOGRAFÍA|\Z)",
         r"Conclusiones generales\s*\n(.+?)(?:\nBIBLIOGRAFÍA|\Z)",
     ]:
-        match = re.search(pattern, body, re.IGNORECASE | re.DOTALL)
+        match = re.search(pattern, scope, re.IGNORECASE | re.DOTALL)
         if match and len(match.group(1).strip()) > 400:
             return match.group(1).strip()
 
     from savt.section_resolver import get_canonical_section
 
-    canonical = get_canonical_section(body, "conclusiones")
+    canonical = get_canonical_section(scope, "conclusiones")
     if len(canonical) > 400:
         return canonical
 
-    match = re.search(
-        r"CONCLUSIONES(.+?)(?:BIBLIOGRAFÍA|$)",
-        body,
-        re.IGNORECASE | re.DOTALL,
-    )
-    return match.group(1).strip() if match else ""
+    return ""
 
 
 def count_words(text: str) -> int:
@@ -326,7 +335,7 @@ def parse_thesis_file(source: BinaryIO | str, filename: str = "tesis.docx") -> d
         infer_topic_keywords_from_document,
         parse_bibliography_by_style,
     )
-    from savt.document_sections import extract_title, get_section_map
+    from savt.document_sections import extract_title
     from savt.pdf_parser import prepare_pdf_text, remove_pdf_front_matter
     from savt.text_normalize import normalize_full_document_text
 
@@ -345,7 +354,13 @@ def parse_thesis_file(source: BinaryIO | str, filename: str = "tesis.docx") -> d
     citation_style = detect_citation_style(body, bib_text)
     bibliography = parse_bibliography_by_style(bib_text, citation_style)
     sections = split_sections(body)
-    section_map = get_section_map(body)
+    conclusions = extract_conclusions(body)
+    from savt.section_resolver import build_enriched_section_map
+
+    section_map, section_meta = build_enriched_section_map(
+        body,
+        conclusions_text=conclusions,
+    )
     topic_keywords = infer_topic_keywords_from_document(full_text, body, filename)
     document_title = extract_title(full_text, filename)
 
@@ -381,6 +396,7 @@ def parse_thesis_file(source: BinaryIO | str, filename: str = "tesis.docx") -> d
         "bibliography": bibliography,
         "sections": sections,
         "section_map": section_map,
+        "section_meta": section_meta,
         "cited_numbers": cited_numbers,
         "cited_keys": cited_keys,
         "citation_contexts": citation_contexts_numbered,
@@ -389,7 +405,7 @@ def parse_thesis_file(source: BinaryIO | str, filename: str = "tesis.docx") -> d
         "document_title": document_title,
         "research_questions": extract_research_questions(body),
         "objectives": extract_objectives(body),
-        "conclusions": extract_conclusions(body),
+        "conclusions": conclusions,
         "word_count": body_words,
         "bibliography_word_count": bib_words,
         "page_estimate": page_estimate,

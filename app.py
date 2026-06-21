@@ -574,8 +574,9 @@ def render_academic_depth(dashboard: dict) -> None:
             rows.append(
                 {
                     "Apartado": item.get("title", "—"),
+                    "Detectado como": item.get("detected_as", "—"),
                     "Palabras": item.get("words", 0),
-                    "Citas /100 pal.": item.get("citation_density", 0),
+                    "Citas": item.get("citation_count", 0),
                     "Marcadores críticos": item.get("critical_markers", 0),
                     "Ind. hallazgos": result_markers if result_markers else "—",
                     "Profundidad": item.get("depth_label", "—"),

@@ -26,6 +26,8 @@ CANONICAL_ROLES: dict[str, tuple[str, ...]] = {
         "planteamiento del problema",
         "problematica",
         "problemática",
+        "planteamiento",
+        "encuadre del problema",
     ),
     "marco_teorico": (
         "marco teórico",
@@ -174,9 +176,12 @@ def discover_headings(body: str) -> list[Heading]:
         r"(?m)^(CAPÍTULO|CAPITULO)\s+([IVXLC\d]+)\.?\s*(.+)$",
         r"(?m)^(PRIMERA|SEGUNDA|TERCERA|CUARTA|QUINTA|SEXTA)\s+PARTE(?:\s+[-–]?\s*(.+))?$",
         r"(?m)^(TOMO\s+[IVXLC\d]+)\s*$",
-        r"(?m)^(INTRODUCCI[ÓO]N|PREGUNTA DE INVESTIGACI[ÓO]N|AN[ÁA]LISIS BIBLIOM[EÉ]TRICO|"
-        r"MARCO TE[OÓ]RICO|MARCO CONCEPTUAL|METODOLOG[IÍ]A|MATERIALES Y M[EÉ]TODOS|"
-        r"RESULTADOS|DISCUSI[ÓO]N|CONCLUSIONES|BIBLIOGRAF[IÍ]A|REFERENCIAS|ANEXOS?)\s*$",
+        r"(?m)^(INTRODUCCI[ÓO]N|PLANTEAMIENTO(?:\s+DEL\s+(?:PROBLEMA|TEMA))?|PREGUNTA DE INVESTIGACI[ÓO]N|AN[ÁA]LISIS BIBLIOM[EÉ]TRICO|"
+        r"MARCO TE[OÓ]RICO|MARCO CONCEPTUAL|FUNDAMENTACI[ÓO]N TE[OÓ]RICA|REVISI[ÓO]N(?:\s+DE\s+LITERATURA|\s+BIBLIOGR[AÁ]FICA)?|"
+        r"METODOLOG[IÍ]A|MATERIALES Y M[EÉ]TODOS|MATERIAL Y M[EÉ]TODO|"
+        r"RESULTADOS|HALLAZGOS(?:\s+PRINCIPALES)?|"
+        r"DISCUSI[ÓO]N|INTERPRETACI[ÓO]N(?:\s+DE(?:\s+LOS)?\s+RESULTADOS)?|"
+        r"CONCLUSIONES(?:\s+GENERALES|\s+FINALES)?|BIBLIOGRAF[IÍ]A|REFERENCIAS|ANEXOS?)\s*(?:$|\s+[A-ZÁÉÍÓÚÑ])",
         r"(?m)^(\d+(?:\.\d+)*\.?\s+[A-ZÁÉÍÓÚÑ][^\n]{4,120})$",
         r"(?m)^(Presentaci[oó]n(?:\s+del\s+Trabajo(?:\s+(?:de\s+)?Tesis| Final)?)?)\s*$",
         r"(?m)^(RESUMEN|ABSTRACT|S[ií]ntesis)\s*$",
@@ -244,10 +249,243 @@ def get_canonical_section(body: str, role: str, fallback_map: dict[str, str] | N
 
 def merged_section_map(body: str, legacy_map: dict[str, str] | None = None) -> dict[str, str]:
     """Combina detección legacy (extract_section) con el mapa canónico."""
-    canonical = build_canonical_map(body)
-    legacy = legacy_map or {}
-    merged = dict(legacy)
-    for role, text in canonical.items():
-        if role not in merged or len(text) > len(merged.get(role, "")):
-            merged[role] = text
-    return merged
+    enriched, _meta = build_enriched_section_map(body, legacy_map=legacy_map)
+    return enriched
+
+
+def _word_count(text: str) -> int:
+    return len(re.findall(r"\b\w+\b", text or "", re.UNICODE))
+
+
+# Encabezados principales en línea (típico en PDF): «METODOLOGÍA El presente capítulo…»
+_MAJOR_INLINE_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = tuple(
+    (role, re.compile(pattern, re.IGNORECASE | re.MULTILINE))
+    for role, pattern in [
+        (
+            "presentacion",
+            r"(?:^|\n)\s*(?:Presentaci[oó]n(?:\s+del\s+Trabajo(?:\s+(?:de\s+)?Tesis| Final)?)?|"
+            r"RESUMEN|ABSTRACT|S[ií]ntesis)\b",
+        ),
+        (
+            "introduccion",
+            r"(?:^|\n)\s*(?:INTRODUCCI[ÓO]N|PLANTEAMIENTO(?:\s+DEL\s+(?:PROBLEMA|TEMA))?)\b",
+        ),
+        (
+            "marco_teorico",
+            r"(?:^|\n)\s*(?:MARCO TE[OÓ]RICO|MARCO CONCEPTUAL|FUNDAMENTACI[ÓO]N TE[OÓ]RICA|"
+            r"REVISI[ÓO]N(?:\s+DE\s+LITERATURA|\s+BIBLIOGR[AÁ]FICA)?|AN[ÁA]LISIS BIBLIOM[EÉ]TRICO|"
+            r"ESTADO DEL ARTE|ANTECEDENTES)\b",
+        ),
+        (
+            "metodologia",
+            r"(?:^|\n)\s*(?:METODOLOG[IÍ]A|MATERIALES Y M[EÉ]TODOS|MATERIAL Y M[EÉ]TODO|"
+            r"DISE[ÑN]O METODOL[ÓO]GICO|DECISIONES METODOL[ÓO]GICAS)\b",
+        ),
+        (
+            "resultados",
+            r"(?:^|\n)\s*(?:RESULTADOS(?:\s+Y\s+DISCUSI[ÓO]N)?|HALLAZGOS(?:\s+PRINCIPALES)?)\b",
+        ),
+        (
+            "discusion",
+            r"(?:^|\n)\s*(?:DISCUSI[ÓO]N|INTERPRETACI[ÓO]N(?:\s+DE(?:\s+LOS)?\s+RESULTADOS)?|"
+            r"AN[ÁA]LISIS(?:\s+E?\s*)?INTERPRETACI[ÓO]N)\b",
+        ),
+        (
+            "conclusiones",
+            r"(?:^|\n)\s*CONCLUSIONES(?:\s+GENERALES|\s+FINALES)?\b",
+        ),
+    ]
+)
+
+
+def _scan_major_section_spans(body: str) -> list[tuple[int, str, str]]:
+    """Primer encabezado principal de cada rol → (posición, rol, título detectado)."""
+    hits: list[tuple[int, str, str]] = []
+
+    marco_patterns = [
+        (r"(?:^|\n)\s*MARCO TE[OÓ]RICO\b", "MARCO TEÓRICO"),
+        (r"(?:^|\n)\s*MARCO CONCEPTUAL\b", "MARCO CONCEPTUAL"),
+        (r"(?:^|\n)\s*FUNDAMENTACI[ÓO]N TE[OÓ]RICA\b", "FUNDAMENTACIÓN TEÓRICA"),
+        (r"(?:^|\n)\s*REVISI[ÓO]N(?:\s+DE\s+LITERATURA|\s+BIBLIOGR[AÁ]FICA)\b", "REVISIÓN DE LITERATURA"),
+        (r"(?:^|\n)\s*AN[ÁA]LISIS BIBLIOM[EÉ]TRICO\b", "ANÁLISIS BIBLIOMÉTRICO"),
+    ]
+    for pattern, label in marco_patterns:
+        match = re.search(pattern, body, re.IGNORECASE | re.MULTILINE)
+        if match:
+            hits.append((match.start(), "marco_teorico", label))
+            break
+
+    for role, pattern in _MAJOR_INLINE_PATTERNS:
+        if role == "marco_teorico":
+            continue
+        match = pattern.search(body)
+        if not match:
+            continue
+        title = re.sub(r"\s+", " ", body[match.start() : match.end()].strip())[:140]
+        hits.append((match.start(), role, title))
+    hits.sort(key=lambda item: item[0])
+
+    seen: set[str] = set()
+    unique: list[tuple[int, str, str]] = []
+    for pos, role, title in hits:
+        if role in seen:
+            continue
+        seen.add(role)
+        unique.append((pos, role, title))
+    return unique
+
+
+def _extract_objetivos_block(body: str) -> tuple[str, list[str]]:
+    titles: list[str] = []
+    start = None
+    for pattern in (
+        r"(?im)(?:^|\n)\s*\d+\.?\s*Objetivo general\b",
+        r"(?im)(?:^|\n)\s*Objetivo general\b",
+        r"(?im)(?:^|\n)\s*\d+\.?\s*Objetivos espec[ií]ficos\b",
+        r"(?im)(?:^|\n)\s*Objetivos espec[ií]ficos\b",
+    ):
+        match = re.search(pattern, body)
+        if match:
+            start = match.start()
+            titles.append(re.sub(r"\s+", " ", match.group(0).strip())[:120])
+            break
+    if start is None:
+        return "", titles
+
+    end_match = re.search(
+        r"(?im)(?:^|\n)\s*MARCO TE[OÓ]RICO\b",
+        body[start + 20 :],
+    )
+    end = start + 20 + end_match.start() if end_match else min(len(body), start + 12000)
+    return body[start:end].strip(), titles
+
+
+def _infer_introduccion_block(body: str, spans: list[tuple[int, str, str]]) -> tuple[str, list[str]]:
+    if any(role == "introduccion" for _pos, role, _title in spans):
+        return "", []
+
+    marco_pos = min((pos for pos, role, _ in spans if role == "marco_teorico"), default=len(body))
+    obj_match = re.search(r"(?im)(?:^|\n)\s*(?:\d+\.?\s*)?Objetivo general\b", body)
+    obj_start = obj_match.start() if obj_match and obj_match.start() < marco_pos else marco_pos
+    end_pos = min(marco_pos, obj_start)
+
+    start_pos = 0
+    for pattern in (
+        r"(?im)(?:^|\n)\s*Tema de la tesis",
+        r"(?im)(?:^|\n)\s*Pregunta de investigación",
+        r"(?im)(?:^|\n)\s*Planteamiento",
+        r"(?im)(?:^|\n)\s*1\.\s",
+    ):
+        match = re.search(pattern, body[: max(end_pos, 1)])
+        if match:
+            start_pos = match.start()
+            break
+
+    chunk = body[start_pos:end_pos].strip()
+    if _word_count(chunk) < 150:
+        chunk = body[:end_pos].strip()
+    if _word_count(chunk) < 150:
+        return "", []
+
+    if re.search(r"(?im)\bINTRODUCCI[ÓO]N\b", chunk[:300]):
+        titles = ["Introducción"]
+    else:
+        titles = ["Introducción (planteamiento, pregunta y justificación)"]
+    return chunk, titles
+
+
+def _map_from_spans(
+    body: str,
+    spans: list[tuple[int, str, str]],
+) -> tuple[dict[str, str], dict[str, dict]]:
+    sections: dict[str, str] = {}
+    meta: dict[str, dict] = {}
+
+    for idx, (pos, role, title) in enumerate(spans):
+        next_pos = spans[idx + 1][0] if idx + 1 < len(spans) else len(body)
+        chunk = body[pos:next_pos].strip()
+        if _word_count(chunk) < 50:
+            continue
+        sections[role] = chunk
+        meta[role] = {"detected_titles": [title]}
+
+    return sections, meta
+
+
+def build_enriched_section_map(
+    body: str,
+    legacy_map: dict[str, str] | None = None,
+    *,
+    conclusions_text: str | None = None,
+) -> tuple[dict[str, str], dict[str, dict]]:
+    """
+    Mapa unificado de apartados: encabezados en línea (PDF), discover_headings,
+    extract_section legacy y bloques inferidos (introducción, objetivos, conclusiones).
+    """
+    legacy = dict(legacy_map or {})
+    for key, aliases in {
+        "introduccion": ("introduc", "planteamiento"),
+        "marco_teorico": ("marco teórico", "marco teorico", "marco conceptual"),
+        "metodologia": ("metodolog", "materiales y métodos"),
+        "resultados": ("resultado",),
+        "discusion": ("discusi", "interpretación de resultados", "interpretacion de resultados"),
+        "conclusiones": ("conclus",),
+        "presentacion": ("presentacion", "presentación", "resumen", "abstract"),
+    }.items():
+        if key not in legacy:
+            from savt.document_sections import extract_section
+
+            text = extract_section(body, aliases)
+            if text:
+                legacy[key] = text
+
+    canonical = build_canonical_map(body, min_chunk=150)
+    spans = _scan_major_section_spans(body)
+    inline_sections, inline_meta = _map_from_spans(body, spans)
+
+    merged: dict[str, str] = dict(legacy)
+    meta: dict[str, dict] = {}
+
+    for source in (canonical, inline_sections, legacy):
+        for role, text in source.items():
+            if role not in merged or len(text) > len(merged.get(role, "")):
+                merged[role] = text
+
+    for role, info in inline_meta.items():
+        meta[role] = {"detected_titles": list(info.get("detected_titles", []))}
+
+    intro_text, intro_titles = _infer_introduccion_block(body, spans)
+    obj_early = re.search(r"(?im)(?:^|\n)\s*(?:\d+\.?\s*)?Objetivo general\b", body)
+    if obj_early and obj_early.start() > 80:
+        pre_obj = body[: obj_early.start()].strip()
+        if _word_count(pre_obj) >= 50:
+            intro_text = pre_obj
+            if re.search(r"(?im)Pregunta de investigación", pre_obj):
+                intro_titles = ["Introducción (pregunta de investigación y planteamiento)"]
+            elif re.search(r"(?im)\bINTRODUCCI[ÓO]N\b", pre_obj[:400]):
+                intro_titles = ["Introducción"]
+            else:
+                intro_titles = ["Introducción (planteamiento y pregunta de investigación)"]
+
+    if intro_text:
+        merged["introduccion"] = intro_text
+        meta["introduccion"] = {"detected_titles": intro_titles}
+
+    obj_text, obj_titles = _extract_objetivos_block(body)
+    if obj_text:
+        merged["objetivos"] = obj_text
+        meta["objetivos"] = {"detected_titles": obj_titles or ["Objetivos"]}
+
+    if conclusions_text and len(conclusions_text) > len(merged.get("conclusiones", "")):
+        merged["conclusiones"] = conclusions_text
+        meta.setdefault("conclusiones", {"detected_titles": []})
+        if "CONCLUSIONES" not in meta["conclusiones"]["detected_titles"]:
+            meta["conclusiones"]["detected_titles"].append("CONCLUSIONES")
+
+    for role, text in merged.items():
+        if role not in meta:
+            meta[role] = {"detected_titles": ["Detectado por contenido"]}
+        elif not meta[role].get("detected_titles"):
+            meta[role]["detected_titles"] = ["Detectado por contenido"]
+
+    return merged, meta
