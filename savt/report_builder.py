@@ -447,6 +447,8 @@ def build_dashboard(report: AuditReport, parsed: dict, extras: dict) -> dict:
         content_dashboard.get("section_depth") or [],
         chapter_reviews,
         findings_by_section,
+        bib_dashboard=bib_dashboard,
+        bibliography_word_count=parsed.get("bibliography_word_count", 0),
     )
 
     return {

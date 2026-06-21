@@ -15,7 +15,7 @@ from savt.report_builder import findings_dataframe_rows
 from savt.section_audit import section_audit_summary_rows
 from savt.taxonomy import AUDIT_AREAS, SEVERITY_LABELS
 from savt.ui_branding import LOGO_PATH, inject_branding
-from savt.ui_labels import conformance_badge, readiness_conformance_badge
+from savt.ui_labels import conformance_badge, conformance_label, readiness_conformance_badge
 
 st.set_page_config(
     page_title="SAVT — Auditoría de Tesis",
@@ -202,21 +202,36 @@ def render_section_by_section_audit(dashboard: dict) -> None:
         badge_ok = ok is True
         title = audit.get("title", "Apartado")
         detected = audit.get("detected_as", "—")
+        status_label = conformance_label(badge_ok, partial and not badge_ok)
         with st.expander(
-            f"{conformance_badge(badge_ok, partial and not badge_ok)} {title} — {detected}",
+            f"{status_label} — {title} — {detected}",
             expanded=partial or ok is False,
         ):
-            m1, m2, m3, m4, m5 = st.columns(5)
-            with m1:
-                st.metric("Palabras", f"{audit.get('words', 0):,}")
-            with m2:
-                st.metric("% cuerpo", audit.get("percent_label", "—"))
-            with m3:
-                st.metric("Citas", audit.get("citation_count", 0))
-            with m4:
-                st.metric("Marcadores críticos", audit.get("critical_markers", 0))
-            with m5:
-                st.metric("Hallazgos", audit.get("findings_count", 0))
+            is_bib = audit.get("role") == "bibliografia"
+            if is_bib:
+                m1, m2, m3, m4, m5 = st.columns(5)
+                with m1:
+                    st.metric("Palabras (bib.)", f"{audit.get('words', 0):,}")
+                with m2:
+                    st.metric("Referencias", audit.get("reference_count", 0))
+                with m3:
+                    st.metric("Citas en texto", audit.get("citation_count", 0))
+                with m4:
+                    st.metric("Hallazgos", audit.get("findings_count", 0))
+                with m5:
+                    st.metric("Estado", audit.get("conformance", "—"))
+            else:
+                m1, m2, m3, m4, m5 = st.columns(5)
+                with m1:
+                    st.metric("Palabras", f"{audit.get('words', 0):,}")
+                with m2:
+                    st.metric("% cuerpo", audit.get("percent_label", "—"))
+                with m3:
+                    st.metric("Citas", audit.get("citation_count", 0))
+                with m4:
+                    st.metric("Marcadores críticos", audit.get("critical_markers", 0))
+                with m5:
+                    st.metric("Hallazgos", audit.get("findings_count", 0))
 
             st.markdown(f"**Estado:** {audit.get('conformance', '—')} · **Profundidad:** {audit.get('depth_label', '—')}")
             if audit.get("depth_reason"):

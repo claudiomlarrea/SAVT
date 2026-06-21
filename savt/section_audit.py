@@ -10,19 +10,46 @@ from savt.word_stats import CANONICAL_SECTION_ORDER, count_words, get_section_wo
 
 ProgressCallback = Callable[[str, str, float, Optional[dict]], None]
 
-# Palabras clave para asignar hallazgos globales a un apartado canónico.
-FINDING_SECTION_HINTS: dict[str, tuple[str, ...]] = {
-    "introduccion": ("introduc", "planteamiento", "pregunta de investig"),
-    "objetivos": ("objetivo", "hipótesis", "hipotesis"),
-    "marco_teorico": ("marco teórico", "marco teorico", "literatura", "marco"),
-    "metodologia": ("metodolog", "método", "metodo", "muestra", "diseño"),
-    "resultados": ("resultado", "hallazgo", "figura", "tabla", "gráfico"),
-    "discusion": ("discusi", "interpretación", "interpretacion"),
-    "conclusiones": ("conclus", "pregunta no respondida", "coherencia objetivos"),
-    "bibliografia": ("bibliograf", "cita", "referencia", "doi", "crossref"),
-    "presentacion": ("resumen", "abstract", "presentación", "presentacion"),
-    "analisis_bibliometrico": ("bibliométr", "bibliometric"),
+# Mapeo directo módulo → apartado (prioridad alta).
+MODULE_SECTION_MAP: dict[str, str] = {
+    "Bibliografía": "bibliografia",
+    "Referencias": "bibliografia",
+    "Estructura": "",  # resolver por título
+    "Contenido": "",  # resolver por título
+    "Objetivos": "objetivos",
+    "Coherencia": "",  # resolver por título
+    "Conclusiones": "conclusiones",
+    "Integridad": "transversal",
+    "Ética": "transversal",
+    "Originalidad": "transversal",
+    "Estilo": "transversal",
+    "Extensión": "transversal",
+    "Formal": "transversal",
+    "Similitud": "transversal",
 }
+
+# Reglas por título (prioridad sobre coincidencias en el detalle).
+TITLE_SECTION_RULES: tuple[tuple[str, str], ...] = (
+    ("introducción incompleta", "introduccion"),
+    ("marco teórico", "marco_teorico"),
+    ("metodología", "metodologia"),
+    ("objetivo específico", "objetivos"),
+    ("coherencia objetivos", "conclusiones"),
+    ("conclus", "conclusiones"),
+    ("pregunta no respondida", "conclusiones"),
+    ("pregunta de investigación", "introduccion"),
+    ("doi inválidos", "bibliografia"),
+    ("citas apa", "bibliografia"),
+    ("año bibliográfico", "bibliografia"),
+    ("referencias bibliográficas", "bibliografia"),
+    ("referencias posiblemente", "bibliografia"),
+    ("originalidad", "transversal"),
+    ("contribución al conocimiento", "conclusiones"),
+    ("figura", "resultados"),
+    ("tabla", "resultados"),
+    ("discusión", "discusion"),
+    ("resultado", "resultados"),
+)
 
 GLOBAL_SECTIONS = (
     ("integridad", "Integridad académica"),
@@ -61,38 +88,43 @@ def detect_document_sections(parsed: dict) -> list[dict]:
 
 
 def infer_finding_section(finding: Finding) -> str:
-    """Asigna un apartado canónico a un hallazgo según área, módulo y texto."""
-    blob = " ".join(
-        filter(
-            None,
-            [
-                finding.area,
-                finding.module,
-                finding.title,
-                finding.detail,
-            ],
-        )
-    ).lower()
+    """Asigna un apartado canónico; prioriza título y módulo sobre el detalle."""
+    module_role = MODULE_SECTION_MAP.get(finding.module, "")
+    if module_role == "transversal":
+        return "transversal"
+    if module_role:
+        return module_role
 
-    best_role = ""
-    best_len = 0
-    for role, hints in FINDING_SECTION_HINTS.items():
-        for hint in hints:
-            if hint in blob and len(hint) > best_len:
-                best_role = role
-                best_len = len(hint)
-    return best_role
+    title_lower = (finding.title or "").lower()
+    for needle, role in TITLE_SECTION_RULES:
+        if needle in title_lower:
+            return role
+
+    area_lower = (finding.area or "").lower()
+    area_map = {
+        "bibliografía": "bibliografia",
+        "conclusiones": "conclusiones",
+        "metodología": "metodologia",
+        "estructura": "",
+        "coherencia": "",
+        "originalidad": "transversal",
+        "integridad": "transversal",
+    }
+    if area_lower in area_map and area_map[area_lower]:
+        return area_map[area_lower]
+
+    return "transversal"
 
 
 def group_findings_by_section(report: AuditReport) -> dict[str, list[dict]]:
-    """Agrupa hallazgos accionables por apartado."""
+    """Agrupa hallazgos accionables por apartado (excluye transversales)."""
     grouped: dict[str, list[dict]] = {}
     for finding in report.findings:
         if finding.severity == "ok":
             continue
         role = finding.section_key or infer_finding_section(finding)
-        if not role:
-            role = "transversal"
+        if not role or role == "transversal":
+            continue
         grouped.setdefault(role, []).append(
             {
                 "severity": finding.severity,
@@ -112,6 +144,9 @@ def build_section_audits(
     section_depth: list[dict],
     chapter_reviews: list[dict],
     findings_by_section: dict[str, list[dict]] | None = None,
+    *,
+    bib_dashboard: dict | None = None,
+    bibliography_word_count: int = 0,
 ) -> list[dict]:
     """Consolida métricas, checklist y hallazgos por apartado detectado."""
     depth_by_role = {item.get("role"): item for item in section_depth if item.get("role")}
@@ -169,18 +204,28 @@ def build_section_audits(
             }
         )
 
-    # Bibliografía: revisión global aunque no tenga bloque de palabras propio.
+    # Bibliografía: métricas del bloque parseado (no del cuerpo particionado).
     bib_review = review_by_key.get("bibliografia")
+    bib = bib_dashboard or {}
     if bib_review and not any(a["role"] == "bibliografia" for a in audits):
+        total_refs = bib.get("total_refs", 0)
+        citations_found = bib.get("citations_found", 0)
+        bib_words = bibliography_word_count or 0
+        bib_pct = "—"
+        if bib_words and detected_sections:
+            body_total = sum(s.get("words", 0) for s in detected_sections)
+            if body_total:
+                bib_pct = f"{round(bib_words * 100 / (body_total + bib_words), 1):.1f}%"
         audits.append(
             {
                 "role": "bibliografia",
                 "order": len(audits) + 1,
                 "title": SECTION_TITLES.get("bibliografia", "Bibliografía"),
                 "detected_as": "Bibliografía / Referencias",
-                "words": 0,
-                "percent_label": "—",
-                "citation_count": 0,
+                "words": bib_words,
+                "percent_label": bib_pct,
+                "reference_count": total_refs,
+                "citation_count": citations_found,
                 "citation_density": 0,
                 "critical_markers": 0,
                 "result_markers": 0,
@@ -221,7 +266,8 @@ def section_audit_summary_rows(section_audits: list[dict]) -> list[dict]:
                 "Detectado como": item.get("detected_as", ""),
                 "Palabras": item.get("words", 0),
                 "% del cuerpo": item.get("percent_label", "—"),
-                "Citas": item.get("citation_count", 0),
+                "Referencias": item.get("reference_count", "—"),
+                "Citas en texto": item.get("citation_count", 0),
                 "Densidad citas/100 pal.": item.get("citation_density", 0),
                 "Marcadores críticos": item.get("critical_markers", 0),
                 "Estado": item.get("conformance", "—"),

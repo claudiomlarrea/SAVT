@@ -363,7 +363,52 @@ def audit_content_quality(parsed: dict, config: AuditConfig) -> tuple[list[Findi
     if not config.check_content_depth:
         return findings, dashboard
 
-    if marco:
+    partition_marco_words = marco_row["words"] if marco_row else 0
+    if partition_marco_words > 0:
+        critical_found = marco_row["critical_markers"]
+        marco_words = partition_marco_words
+        density = marco_row["citation_density"]
+        dashboard["critical_markers_found"] = critical_found
+        dashboard["marco_word_count"] = marco_words
+        dashboard["citation_density_marco"] = density
+
+        if marco_words < 800:
+            findings.append(
+                Finding(
+                    module="Contenido",
+                    severity="info",
+                    title="Marco teórico breve para el nivel del trabajo",
+                    detail=f"Marco teórico detectado: ~{marco_words} palabras.",
+                    why="Los jurados suelen valorar profundidad en revisión de literatura.",
+                    how_to_fix="Amplíe síntesis crítica de autores clave, debates y vacíos de conocimiento.",
+                    section_key="marco_teorico",
+                )
+            )
+        elif critical_found >= 3 or density >= 1.5:
+            findings.append(
+                Finding(
+                    module="Contenido",
+                    severity="ok",
+                    title="Marco teórico con desarrollo detectable",
+                    detail=(
+                        f"Extensión ~{marco_words} palabras, densidad de citas {density}/100, "
+                        f"marcadores críticos: {critical_found}."
+                    ),
+                    section_key="marco_teorico",
+                )
+            )
+        else:
+            findings.append(
+                Finding(
+                    module="Contenido",
+                    severity="info",
+                    title="Marco teórico descriptivo",
+                    detail="El marco podría reforzar contraste, debate o crítica explícita.",
+                    how_to_fix="Contraste autores y relacione teorías con su problema de investigación.",
+                    section_key="marco_teorico",
+                )
+            )
+    elif marco:
         marco_metrics = _section_metrics(marco)
         critical_found = marco_metrics["critical_markers"]
         marco_words = marco_metrics["words"]
@@ -381,6 +426,7 @@ def audit_content_quality(parsed: dict, config: AuditConfig) -> tuple[list[Findi
                     detail=f"Marco teórico detectado: ~{marco_words} palabras.",
                     why="Los jurados suelen valorar profundidad en revisión de literatura.",
                     how_to_fix="Amplíe síntesis crítica de autores clave, debates y vacíos de conocimiento.",
+                    section_key="marco_teorico",
                 )
             )
         elif critical_found >= 3 or density >= 1.5:
@@ -393,6 +439,7 @@ def audit_content_quality(parsed: dict, config: AuditConfig) -> tuple[list[Findi
                         f"Extensión ~{marco_words} palabras, densidad de citas {density}/100, "
                         f"marcadores críticos: {critical_found}."
                     ),
+                    section_key="marco_teorico",
                 )
             )
         else:
@@ -403,6 +450,7 @@ def audit_content_quality(parsed: dict, config: AuditConfig) -> tuple[list[Findi
                     title="Marco teórico descriptivo",
                     detail="El marco podría reforzar contraste, debate o crítica explícita.",
                     how_to_fix="Contraste autores y relacione teorías con su problema de investigación.",
+                    section_key="marco_teorico",
                 )
             )
     else:
