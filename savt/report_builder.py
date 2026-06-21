@@ -10,6 +10,7 @@ from savt.chapter_reviews import (
 from savt.content_quality import reconcile_section_depth_with_reviews
 from savt.models import AuditReport, Finding
 from savt.section_audit import (
+    build_citation_reconciliation,
     build_section_audits,
     detect_document_sections,
     group_findings_by_section,
@@ -449,7 +450,10 @@ def build_dashboard(report: AuditReport, parsed: dict, extras: dict) -> dict:
         findings_by_section,
         bib_dashboard=bib_dashboard,
         bibliography_word_count=parsed.get("bibliography_word_count", 0),
+        parsed=parsed,
+        report=report,
     )
+    citation_reconciliation = build_citation_reconciliation(parsed, report, bib_dashboard)
 
     return {
         "icai": report.score,
@@ -474,6 +478,7 @@ def build_dashboard(report: AuditReport, parsed: dict, extras: dict) -> dict:
         "detected_sections": detected_sections,
         "section_audits": section_audits,
         "findings_by_section": findings_by_section,
+        "citation_reconciliation": citation_reconciliation,
         "profile_label": profile_label,
         "formal_dashboard": extras.get("formal_dashboard") or {},
         "integrity_dashboard": extras.get("integrity_dashboard") or {},

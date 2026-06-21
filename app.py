@@ -196,6 +196,24 @@ def render_section_by_section_audit(dashboard: dict) -> None:
     summary_rows = section_audit_summary_rows(section_audits)
     st.dataframe(summary_rows, use_container_width=True, hide_index=True)
 
+    reconciliation = dashboard.get("citation_reconciliation") or {}
+    recon_rows = reconciliation.get("reconciliation_rows") or []
+    if recon_rows:
+        st.markdown("**Cuadre de citas y referencias**")
+        st.caption(
+            "«Apariciones cita» cuenta cada paréntesis de cita en el apartado. "
+            "«N° refs distintos» son números/claves únicos. La fila Σ debe coincidir con el cuerpo completo; "
+            "la bibliografía lista entradas, no apariciones."
+        )
+        st.dataframe(recon_rows, use_container_width=True, hide_index=True)
+        for note in reconciliation.get("notes") or []:
+            if "Coincide" in note:
+                st.caption(f"✓ {note}")
+            elif "Diferencia" in note or "Alerta" in note:
+                st.warning(note)
+            else:
+                st.caption(note)
+
     for audit in section_audits:
         ok = audit.get("review_ok")
         partial = audit.get("review_partial", False)
@@ -227,9 +245,9 @@ def render_section_by_section_audit(dashboard: dict) -> None:
                 with m2:
                     st.metric("% cuerpo", audit.get("percent_label", "—"))
                 with m3:
-                    st.metric("Citas", audit.get("citation_count", 0))
+                    st.metric("Apariciones cita", audit.get("citation_occurrences", audit.get("citation_count", 0)))
                 with m4:
-                    st.metric("Marcadores críticos", audit.get("critical_markers", 0))
+                    st.metric("Refs distintos", audit.get("unique_refs_cited", "—"))
                 with m5:
                     st.metric("Hallazgos", audit.get("findings_count", 0))
 

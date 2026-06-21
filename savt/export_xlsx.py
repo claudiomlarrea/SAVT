@@ -109,6 +109,14 @@ def build_report_xlsx(report: AuditReport, dashboard: dict) -> bytes:
         "Revisión apartado por apartado",
     )
 
+    recon = dashboard.get("citation_reconciliation") or {}
+    if recon.get("reconciliation_rows"):
+        ws_recon = wb.create_sheet("Cuadre citas")
+        recon_rows = list(recon["reconciliation_rows"])
+        for note in recon.get("notes") or []:
+            recon_rows.append({"Apartado": "Nota", "Apariciones cita": note, "N° refs distintos": ""})
+        _write_sheet_from_rows(ws_recon, recon_rows, "Cuadre de citas y referencias")
+
     # --- Profundidad académica ---
     content = dashboard.get("content_dashboard") or {}
     depth_rows = []
