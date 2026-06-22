@@ -1,4 +1,4 @@
 [project]
 name = "savt"
-version = "0.3.7"
-requires-python = ">=3.10"
+version = "0.3.8"
+requires-python = ">=3.11,<3.13"

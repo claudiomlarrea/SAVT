@@ -171,7 +171,7 @@ def render_detected_sections(dashboard: dict) -> None:
         }
         for idx, item in enumerate(detected, start=1)
     ]
-    st.dataframe(rows, use_container_width=True, hide_index=True)
+    st.dataframe(rows, width="stretch", hide_index=True)
     total_words = sum(item.get("words", 0) for item in detected)
     st.caption(f"Total clasificado en apartados: **{total_words:,}** palabras en **{len(detected)}** bloques.")
 
@@ -191,11 +191,11 @@ def render_technical_section_detail(dashboard: dict) -> None:
             "«Apartados con observaciones»; el checklist resume el estado de cada capítulo."
         )
         if section_audits:
-            st.dataframe(section_audit_summary_rows(section_audits), use_container_width=True, hide_index=True)
+            st.dataframe(section_audit_summary_rows(section_audits), width="stretch", hide_index=True)
         recon_rows = reconciliation.get("reconciliation_rows") or []
         if recon_rows:
             st.markdown("**Cuadre de citas y referencias**")
-            st.dataframe(recon_rows, use_container_width=True, hide_index=True)
+            st.dataframe(recon_rows, width="stretch", hide_index=True)
             for note in reconciliation.get("notes") or []:
                 if "Coincide" in note:
                     st.caption(f"✓ {note}")
@@ -605,7 +605,7 @@ def render_document_data(dashboard: dict, report) -> None:
             }
             for item in sections
         ]
-        st.dataframe(rows, use_container_width=True, hide_index=True)
+        st.dataframe(rows, width="stretch", hide_index=True)
 
     if formal:
         with st.expander("Normativa formal detectada", expanded=False):
@@ -640,7 +640,7 @@ def render_academic_depth(dashboard: dict) -> None:
                     "Índice profundidad": item.get("depth_label", "—"),
                 }
             )
-        st.dataframe(rows, use_container_width=True, hide_index=True)
+        st.dataframe(rows, width="stretch", hide_index=True)
 
     st.markdown("**Indicadores transversales**")
     if content.get("hypothesis_detected"):
@@ -728,7 +728,7 @@ def render_findings_table(report) -> None:
         if show_ok:
             df = pd.concat([df, pd.DataFrame(ok_rows)], ignore_index=True)
         filtered = df[df["Severidad"].isin(severity_filter) & df["Área"].isin(area_filter)]
-        st.dataframe(filtered, use_container_width=True, hide_index=True)
+        st.dataframe(filtered, width="stretch", hide_index=True)
 
 
 def render_final_report(report, dashboard: dict, base_name: str) -> None:
@@ -751,7 +751,7 @@ def render_final_report(report, dashboard: dict, base_name: str) -> None:
             data=csv,
             file_name=f"informe_savt_{base_name}.csv",
             mime="text/csv",
-            use_container_width=True,
+            width="stretch",
         )
     with col_xlsx:
         xlsx_bytes = build_report_xlsx(report, dashboard)
@@ -760,7 +760,7 @@ def render_final_report(report, dashboard: dict, base_name: str) -> None:
             data=xlsx_bytes,
             file_name=f"informe_savt_{base_name}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            use_container_width=True,
+            width="stretch",
         )
     with col_docx:
         docx_bytes = build_report_docx(report, dashboard)
@@ -769,7 +769,7 @@ def render_final_report(report, dashboard: dict, base_name: str) -> None:
             data=docx_bytes,
             file_name=f"informe_savt_{base_name}.docx",
             mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            use_container_width=True,
+            width="stretch",
         )
 
 
@@ -847,7 +847,7 @@ def render_bibliography_table(report) -> None:
                     "Referencia": ref.raw[:220] + ("…" if len(ref.raw) > 220 else ""),
                 }
             )
-        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+        st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
 
 
 def main() -> None:
@@ -881,7 +881,7 @@ def _run_app() -> None:
         )
         return
 
-    if st.button("Ejecutar auditoría", type="primary", use_container_width=True):
+    if st.button("Ejecutar auditoría", type="primary", width="stretch"):
         progress_bar = st.progress(0.0)
         status_box = st.empty()
         preview_box = st.empty()
@@ -900,7 +900,7 @@ def _run_app() -> None:
                     }
                     for s in payload["detected_sections"]
                 ]
-                preview_box.dataframe(preview_rows, use_container_width=True, hide_index=True)
+                preview_box.dataframe(preview_rows, width="stretch", hide_index=True)
 
         with st.spinner("Analizando tesis…"):
             from savt.audit import run_audit
