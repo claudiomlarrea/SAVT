@@ -132,13 +132,12 @@ def render_sidebar(report=None) -> "AuditConfig":
         from savt.ui_labels import citation_style_label
 
         bib_dash = (report.metadata.get("dashboard") or {}).get("bibliography_dashboard") or {}
-        refs_in_text = bib_dash.get("citations_found")
+        refs_used = bib_dash.get("citations_found")
         with st.sidebar.expander("Datos técnicos del documento", expanded=False):
             st.write(f"Perfil: {report.metadata.get('profile_label', '—')}")
             st.write(f"Palabras (cuerpo): {report.word_count:,}")
-            if refs_in_text is not None:
-                st.write(f"Referencias en el texto: {refs_in_text}")
-            st.write(f"Referencias en Bibliografía: {len(report.bibliography)}")
+            if refs_used is not None:
+                st.write(f"Referencias totales utilizadas: {refs_used}")
             st.write(f"Estilo: {citation_style_label(report.metadata.get('citation_style'))}")
             if report.metadata.get("file_type") == "pdf":
                 st.write(f"Páginas PDF: {report.metadata.get('pdf_page_count', '—')}")
@@ -197,29 +196,16 @@ def render_technical_section_detail(dashboard: dict) -> None:
     from savt.section_audit import section_audit_summary_rows
 
     section_audits = dashboard.get("section_audits") or []
-    reconciliation = dashboard.get("citation_reconciliation") or {}
-    if not section_audits and not reconciliation.get("reconciliation_rows"):
+    if not section_audits:
         return
 
-    with st.expander("Detalle técnico: métricas por apartado y cuadre de citas", expanded=False):
+    with st.expander("Detalle técnico: métricas por apartado", expanded=False):
         st.caption(
             "Vista analítica para revisión avanzada. «Apariciones cita» cuenta cada grupo "
-            "(1), (2,3) en el apartado; «N° refs distintos» son referencias únicas citadas ahí. "
-            "El total global de referencias citadas figura en Bibliografía y citación."
+            "(1), (2,3) en el apartado; «N° refs distintos» son referencias únicas citadas ahí."
         )
         if section_audits:
             st.dataframe(section_audit_summary_rows(section_audits), hide_index=True)
-        recon_rows = reconciliation.get("reconciliation_rows") or []
-        if recon_rows:
-            st.markdown("**Cuadre de citas y referencias**")
-            st.dataframe(recon_rows, hide_index=True)
-            for note in reconciliation.get("notes") or []:
-                if "Coincide" in note:
-                    st.caption(f"✓ {note}")
-                elif "Diferencia" in note or "Alerta" in note:
-                    st.warning(note)
-                else:
-                    st.caption(note)
 
 
 def render_verdict(dashboard: dict) -> None:
@@ -385,24 +371,16 @@ def render_bibliography(dashboard: dict) -> None:
     st.markdown("## Bibliografía y citación")
 
     unmatched = bib.get("unmatched_citations", 0)
-    citations_ok = unmatched == 0
     coverage_ok = bib["coverage"] == "adecuada"
     coverage_partial = bib["coverage"] not in ("adecuada", "—")
 
     summary_lines = [
         f"{conformance_badge(bib.get('style_ok', True))} — Estilo {bib['style']} detectado",
-        f"{conformance_badge(bib['total_refs'] > 0)} — {bib['total_refs']} entradas bibliográficas",
         (
-            f"{conformance_badge(citations_ok, not citations_ok)} — "
-            f"{bib['citations_found']} referencias en el texto"
+            f"{conformance_badge(bib.get('citations_found', 0) > 0)} — "
+            f"{bib.get('citations_found', 0)} referencias totales utilizadas"
         ),
     ]
-    if unmatched:
-        summary_lines.append(
-            f"{conformance_badge(False, True)} — {unmatched} citas no emparejadas"
-        )
-    else:
-        summary_lines.append(f"{conformance_badge(True)} — Citas emparejadas con bibliografía")
     if bib["out_of_period"]:
         summary_lines.append(
             f"{conformance_badge(False, True)} — {bib['out_of_period']} referencias fuera del período metodológico"
@@ -605,36 +583,21 @@ def render_document_data(dashboard: dict, report) -> None:
     st.markdown("## Datos del documento")
     st.caption(f"Perfil: {dashboard.get('profile_label', '—')}")
 
-    refs_in_text = bib.get("citations_found", 0)
-    refs_in_bibliography = bib.get("total_refs", len(report.bibliography))
+    refs_used = bib.get("citations_found", 0)
     pages = report.metadata.get("pdf_page_count") or report.page_estimate
     citation_style = citation_style_label(report.metadata.get("citation_style"))
 
-    row1 = st.columns(3)
+    row1 = st.columns(2)
     with row1[0]:
         st.metric("Palabras (cuerpo)", f"{report.word_count:,}")
     with row1[1]:
-        st.metric("Referencias en el texto", refs_in_text)
-    with row1[2]:
-        st.metric("Referencias en Bibliografía", refs_in_bibliography)
+        st.metric("Referencias totales utilizadas", refs_used)
 
     row2 = st.columns(2)
     with row2[0]:
         st.metric("Páginas", pages)
     with row2[1]:
         st.metric("Estilo de citación", citation_style)
-
-    if refs_in_text != refs_in_bibliography:
-        delta = refs_in_text - refs_in_bibliography
-        if delta > 0:
-            st.caption(
-                f"Hay {delta} referencia(s) citada(s) en el texto sin entrada correspondiente "
-                "en bibliografía."
-            )
-        else:
-            st.caption(
-                f"Hay {abs(delta)} entrada(s) en bibliografía que no aparecen citadas en el texto."
-            )
 
     help_text = content.get("indicator_help") or {}
     if content.get("bibliography_words"):

@@ -80,14 +80,8 @@ def build_report_xlsx(report: AuditReport, dashboard: dict) -> bytes:
         {"Campo": "Checklist", "Valor": checklist.get("status", "—")},
         {"Campo": "Palabras (cuerpo)", "Valor": report.word_count},
         {
-            "Campo": "Referencias en el texto",
+            "Campo": "Referencias totales utilizadas",
             "Valor": (dashboard.get("bibliography_dashboard") or {}).get("citations_found", 0),
-        },
-        {
-            "Campo": "Referencias en Bibliografía",
-            "Valor": (dashboard.get("bibliography_dashboard") or {}).get(
-                "total_refs", len(report.bibliography)
-            ),
         },
         {
             "Campo": "Páginas",
