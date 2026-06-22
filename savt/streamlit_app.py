@@ -11,7 +11,6 @@ import streamlit as st
 def _lazy_ui():
     from savt.ui_branding import LOGO_PATH, inject_branding
     from savt.ui_labels import (
-        citation_style_label,
         conformance_badge,
         conformance_label,
         readiness_conformance_badge,
@@ -130,6 +129,8 @@ def render_sidebar(report=None) -> "AuditConfig":
     check_content = st.sidebar.checkbox("Profundidad académica", value=True)
 
     if report:
+        from savt.ui_labels import citation_style_label
+
         bib_dash = (report.metadata.get("dashboard") or {}).get("bibliography_dashboard") or {}
         refs_in_text = bib_dash.get("citations_found")
         with st.sidebar.expander("Datos técnicos del documento", expanded=False):
@@ -596,6 +597,8 @@ def render_ethics(dashboard: dict) -> None:
 
 
 def render_document_data(dashboard: dict, report) -> None:
+    from savt.ui_labels import citation_style_label
+
     content = dashboard.get("content_dashboard") or {}
     formal = dashboard.get("formal_dashboard") or {}
     bib = dashboard.get("bibliography_dashboard") or {}
