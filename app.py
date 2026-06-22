@@ -1,15 +1,9 @@
 from __future__ import annotations
 
 import io
+import sys
 
 import streamlit as st
-
-from savt import __app_name__, __version__
-from savt.audit_config import AuditConfig
-from savt.institutional_profiles import PROFILES, profile_options
-from savt.taxonomy import AUDIT_AREAS, SEVERITY_LABELS
-from savt.ui_branding import LOGO_PATH, inject_branding
-from savt.ui_labels import conformance_badge, conformance_label, readiness_conformance_badge
 
 st.set_page_config(
     page_title="SAVT — Auditoría de Tesis",
@@ -18,7 +12,19 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-inject_branding()
+
+def _lazy_ui():
+    from savt.ui_branding import LOGO_PATH, inject_branding
+    from savt.ui_labels import conformance_badge, conformance_label, readiness_conformance_badge
+
+    inject_branding()
+    return LOGO_PATH, conformance_badge, conformance_label, readiness_conformance_badge
+
+
+LOGO_PATH = None
+conformance_badge = None
+conformance_label = None
+readiness_conformance_badge = None
 
 SEVERITY_FILTER_OPTIONS = [
     "Errores críticos",
@@ -28,9 +34,11 @@ SEVERITY_FILTER_OPTIONS = [
 
 
 def render_header() -> None:
+    from savt import __app_name__, __version__
+
     logo_col, hero_col = st.columns([1, 4])
     with logo_col:
-        if LOGO_PATH.exists():
+        if LOGO_PATH and LOGO_PATH.exists():
             st.image(str(LOGO_PATH), width=130)
     with hero_col:
         st.markdown(
@@ -50,8 +58,12 @@ def render_header() -> None:
         )
 
 
-def render_sidebar(report=None) -> AuditConfig:
-    if LOGO_PATH.exists():
+def render_sidebar(report=None) -> "AuditConfig":
+    from savt import __version__
+    from savt.audit_config import AuditConfig
+    from savt.institutional_profiles import PROFILES, profile_options
+
+    if LOGO_PATH and LOGO_PATH.exists():
         st.sidebar.image(str(LOGO_PATH), width=120)
     st.sidebar.header("Configuración")
 
@@ -131,7 +143,7 @@ def render_sidebar(report=None) -> AuditConfig:
                 st.warning(f"Extensión fuera del rango {min_pages}–{max_pages} páginas.")
 
     st.sidebar.markdown("---")
-    st.sidebar.caption(f"Versión {__version__} · Python {__import__('sys').version.split()[0]}")
+    st.sidebar.caption(f"Versión {__version__} · Python {sys.version.split()[0]}")
 
     return AuditConfig(
         profile_id=profile_id,
@@ -170,7 +182,7 @@ def render_detected_sections(dashboard: dict) -> None:
         }
         for idx, item in enumerate(detected, start=1)
     ]
-    st.dataframe(rows, width="stretch", hide_index=True)
+    st.dataframe(rows, hide_index=True)
     total_words = sum(item.get("words", 0) for item in detected)
     st.caption(f"Total clasificado en apartados: **{total_words:,}** palabras en **{len(detected)}** bloques.")
 
@@ -190,11 +202,11 @@ def render_technical_section_detail(dashboard: dict) -> None:
             "«Apartados con observaciones»; el checklist resume el estado de cada capítulo."
         )
         if section_audits:
-            st.dataframe(section_audit_summary_rows(section_audits), width="stretch", hide_index=True)
+            st.dataframe(section_audit_summary_rows(section_audits), hide_index=True)
         recon_rows = reconciliation.get("reconciliation_rows") or []
         if recon_rows:
             st.markdown("**Cuadre de citas y referencias**")
-            st.dataframe(recon_rows, width="stretch", hide_index=True)
+            st.dataframe(recon_rows, hide_index=True)
             for note in reconciliation.get("notes") or []:
                 if "Coincide" in note:
                     st.caption(f"✓ {note}")
@@ -604,7 +616,7 @@ def render_document_data(dashboard: dict, report) -> None:
             }
             for item in sections
         ]
-        st.dataframe(rows, width="stretch", hide_index=True)
+        st.dataframe(rows, hide_index=True)
 
     if formal:
         with st.expander("Normativa formal detectada", expanded=False):
@@ -639,7 +651,7 @@ def render_academic_depth(dashboard: dict) -> None:
                     "Índice profundidad": item.get("depth_label", "—"),
                 }
             )
-        st.dataframe(rows, width="stretch", hide_index=True)
+        st.dataframe(rows, hide_index=True)
 
     st.markdown("**Indicadores transversales**")
     if content.get("hypothesis_detected"):
@@ -688,7 +700,9 @@ def render_originality(dashboard: dict) -> None:
 
 def render_findings_table(report) -> None:
     import pandas as pd
+
     from savt.report_builder import findings_dataframe_rows
+    from savt.taxonomy import AUDIT_AREAS, SEVERITY_LABELS
 
     with st.expander("Detalle completo de hallazgos (filtros avanzados)", expanded=False):
         rows = findings_dataframe_rows(report)
@@ -728,7 +742,7 @@ def render_findings_table(report) -> None:
         if show_ok:
             df = pd.concat([df, pd.DataFrame(ok_rows)], ignore_index=True)
         filtered = df[df["Severidad"].isin(severity_filter) & df["Área"].isin(area_filter)]
-        st.dataframe(filtered, width="stretch", hide_index=True)
+        st.dataframe(filtered, hide_index=True)
 
 
 def render_final_report(report, dashboard: dict, base_name: str) -> None:
@@ -847,7 +861,7 @@ def render_bibliography_table(report) -> None:
                     "Referencia": ref.raw[:220] + ("…" if len(ref.raw) > 220 else ""),
                 }
             )
-        st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
+        st.dataframe(pd.DataFrame(rows), hide_index=True)
 
 
 def main() -> None:
@@ -863,6 +877,15 @@ def main() -> None:
 
 
 def _run_app() -> None:
+    global LOGO_PATH, conformance_badge, conformance_label, readiness_conformance_badge
+    LOGO_PATH, conformance_badge, conformance_label, readiness_conformance_badge = _lazy_ui()
+
+    if sys.version_info >= (3, 13):
+        st.sidebar.warning(
+            "Entorno Python "
+            f"{sys.version.split()[0]}: si la app falla, redeploy en Streamlit Cloud con Python 3.11."
+        )
+
     render_header()
     report = st.session_state.get("report")
     config = render_sidebar(report)
@@ -900,7 +923,7 @@ def _run_app() -> None:
                     }
                     for s in payload["detected_sections"]
                 ]
-                preview_box.dataframe(preview_rows, width="stretch", hide_index=True)
+                preview_box.dataframe(preview_rows, hide_index=True)
 
         with st.spinner("Analizando tesis…"):
             from savt.audit import run_audit
