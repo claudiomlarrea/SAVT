@@ -60,3 +60,14 @@ def conformance_badge_from_label(label: str) -> str:
 
 def readiness_conformance_badge(status: str) -> str:
     return conformance_badge_from_label(readiness_conformance_label(status))
+
+
+def citation_style_label(style: str | None) -> str:
+    if not style or style == "—":
+        return "—"
+    normalized = style.strip().lower()
+    if normalized in ("numbered", "numeric", "vancouver"):
+        return "Vancouver"
+    if normalized == "apa":
+        return "APA"
+    return style.upper()

@@ -9,7 +9,7 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
-from savt import __app_name__, __version__
+from savt.ui_labels import citation_style_label
 from savt.models import AuditReport
 from savt.report_builder import display_title, findings_dataframe_rows, gravity_label
 from savt.section_audit import section_audit_summary_rows
@@ -84,7 +84,7 @@ def build_report_xlsx(report: AuditReport, dashboard: dict) -> bytes:
             "Valor": (dashboard.get("bibliography_dashboard") or {}).get("citations_found", 0),
         },
         {
-            "Campo": "Referencias en el capítulo de referencias (Bibliografía)",
+            "Campo": "Referencias en Bibliografía",
             "Valor": (dashboard.get("bibliography_dashboard") or {}).get(
                 "total_refs", len(report.bibliography)
             ),
@@ -95,7 +95,7 @@ def build_report_xlsx(report: AuditReport, dashboard: dict) -> bytes:
         },
         {
             "Campo": "Estilo de citación",
-            "Valor": (report.metadata.get("citation_style") or "—").upper(),
+            "Valor": citation_style_label(report.metadata.get("citation_style")),
         },
         {"Campo": "Errores críticos", "Valor": dashboard.get("errors", 0)},
         {"Campo": "Advertencias", "Valor": dashboard.get("warnings", 0)},

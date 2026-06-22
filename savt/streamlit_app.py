@@ -10,7 +10,12 @@ import streamlit as st
 
 def _lazy_ui():
     from savt.ui_branding import LOGO_PATH, inject_branding
-    from savt.ui_labels import conformance_badge, conformance_label, readiness_conformance_badge
+    from savt.ui_labels import (
+        citation_style_label,
+        conformance_badge,
+        conformance_label,
+        readiness_conformance_badge,
+    )
 
     inject_branding()
     return LOGO_PATH, conformance_badge, conformance_label, readiness_conformance_badge
@@ -133,7 +138,7 @@ def render_sidebar(report=None) -> "AuditConfig":
             if refs_in_text is not None:
                 st.write(f"Referencias en el texto: {refs_in_text}")
             st.write(f"Referencias en Bibliografía: {len(report.bibliography)}")
-            st.write(f"Estilo: {report.metadata.get('citation_style', '—').upper()}")
+            st.write(f"Estilo: {citation_style_label(report.metadata.get('citation_style'))}")
             if report.metadata.get("file_type") == "pdf":
                 st.write(f"Páginas PDF: {report.metadata.get('pdf_page_count', '—')}")
             else:
@@ -600,7 +605,7 @@ def render_document_data(dashboard: dict, report) -> None:
     refs_in_text = bib.get("citations_found", 0)
     refs_in_bibliography = bib.get("total_refs", len(report.bibliography))
     pages = report.metadata.get("pdf_page_count") or report.page_estimate
-    citation_style = report.metadata.get("citation_style", "—").upper()
+    citation_style = citation_style_label(report.metadata.get("citation_style"))
 
     row1 = st.columns(3)
     with row1[0]:
@@ -608,10 +613,7 @@ def render_document_data(dashboard: dict, report) -> None:
     with row1[1]:
         st.metric("Referencias en el texto", refs_in_text)
     with row1[2]:
-        st.metric(
-            "Referencias en el capítulo de referencias (Bibliografía)",
-            refs_in_bibliography,
-        )
+        st.metric("Referencias en Bibliografía", refs_in_bibliography)
 
     row2 = st.columns(2)
     with row2[0]:
@@ -624,7 +626,7 @@ def render_document_data(dashboard: dict, report) -> None:
         if delta > 0:
             st.caption(
                 f"Hay {delta} referencia(s) citada(s) en el texto sin entrada correspondiente "
-                "en el capítulo de referencias."
+                "en bibliografía."
             )
         else:
             st.caption(
