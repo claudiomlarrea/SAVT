@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import io
 
-import pandas as pd
 import streamlit as st
 
 from savt import __app_name__, __version__
@@ -132,7 +131,7 @@ def render_sidebar(report=None) -> AuditConfig:
                 st.warning(f"Extensión fuera del rango {min_pages}–{max_pages} páginas.")
 
     st.sidebar.markdown("---")
-    st.sidebar.caption(f"Versión {__version__}")
+    st.sidebar.caption(f"Versión {__version__} · Python {__import__('sys').version.split()[0]}")
 
     return AuditConfig(
         profile_id=profile_id,
@@ -688,6 +687,7 @@ def render_originality(dashboard: dict) -> None:
 
 
 def render_findings_table(report) -> None:
+    import pandas as pd
     from savt.report_builder import findings_dataframe_rows
 
     with st.expander("Detalle completo de hallazgos (filtros avanzados)", expanded=False):
@@ -732,6 +732,7 @@ def render_findings_table(report) -> None:
 
 
 def render_final_report(report, dashboard: dict, base_name: str) -> None:
+    import pandas as pd
     from savt.export_docx import build_report_docx
     from savt.export_xlsx import build_report_xlsx
     from savt.report_builder import findings_dataframe_rows
@@ -751,7 +752,6 @@ def render_final_report(report, dashboard: dict, base_name: str) -> None:
             data=csv,
             file_name=f"informe_savt_{base_name}.csv",
             mime="text/csv",
-            width="stretch",
         )
     with col_xlsx:
         xlsx_bytes = build_report_xlsx(report, dashboard)
@@ -760,7 +760,6 @@ def render_final_report(report, dashboard: dict, base_name: str) -> None:
             data=xlsx_bytes,
             file_name=f"informe_savt_{base_name}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            width="stretch",
         )
     with col_docx:
         docx_bytes = build_report_docx(report, dashboard)
@@ -769,7 +768,6 @@ def render_final_report(report, dashboard: dict, base_name: str) -> None:
             data=docx_bytes,
             file_name=f"informe_savt_{base_name}.docx",
             mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            width="stretch",
         )
 
 
@@ -822,6 +820,8 @@ def render_hallazgos(dashboard: dict) -> None:
 
 
 def render_bibliography_table(report) -> None:
+    import pandas as pd
+
     with st.expander("Listado completo de referencias detectadas", expanded=False):
         st.caption(
             "Cada fila es una referencia que el sistema extrajo de la bibliografía de su tesis: "
@@ -881,7 +881,7 @@ def _run_app() -> None:
         )
         return
 
-    if st.button("Ejecutar auditoría", type="primary", width="stretch"):
+    if st.button("Ejecutar auditoría", type="primary"):
         progress_bar = st.progress(0.0)
         status_box = st.empty()
         preview_box = st.empty()

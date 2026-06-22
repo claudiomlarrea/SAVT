@@ -22,10 +22,8 @@ def inject_branding() -> None:
     st.markdown(
         f"""
         <style>
-        @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700&display=swap');
-
         html, body, [class*="css"] {{
-            font-family: "Montserrat", sans-serif;
+            font-family: "Montserrat", "Helvetica Neue", Arial, sans-serif;
         }}
 
         .block-container {{
