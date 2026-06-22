@@ -30,12 +30,12 @@ Requisito: Python **3.10+** (recomendado 3.11, ver `.python-version`).
 
 No hace falta configurar secrets para el uso básico. La verificación DOI usa Crossref (API pública).
 
-### Si el deploy falla
+### Si el deploy falla o queda en "Your app is in the oven"
 
-- Verificar que `requirements.txt` esté en la raíz y que las versiones existan en PyPI (p. ej. `streamlit==1.50.0`, no versiones inventadas).
-- En **Advanced settings**, elegir Python **3.11** (coincide con `.python-version` y `packages.toml`).
-- Revisar logs en Streamlit Cloud → Manage app → Logs.
-- PyMuPDF puede tardar unos minutos en instalar en el primer deploy.
+1. En **Manage app → Logs**, buscar errores de `pip` (p. ej. `pyarrow`, `numpy`).
+2. En **Advanced settings**, usar Python **3.11** o **3.13** (las dependencias actuales soportan ambos).
+3. **Reboot app** (tres puntos → Reboot) o borrar la app y volver a desplegarla.
+4. Verificar que el repo sea `claudiomlarrea/SAVT`, rama `main`, archivo `app.py`.
 
 ## Paso 2 — Compartir la app
 
