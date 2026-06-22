@@ -15,18 +15,35 @@ CHAPTER_PATTERN = re.compile(
     re.IGNORECASE,
 )
 SECTION_PATTERN = re.compile(r"^(\d+(?:\.\d+)+)\s+(.+)$")
-NUMERIC_CITATION_PATTERN = re.compile(r"\((\d+(?:[,\s\-–]\d+)*)\)")
+NUMERIC_CITATION_PATTERN = re.compile(r"\((\d+(?:\s*[,\s\-–]\s*\d+)*)\)")
 NUMBERED_BIB_ENTRY_START = re.compile(
     r"(?m)^(\d+)\.\s+([A-Za-zÁÉÍÓÚáéíóúñ\"(].*)"
 )
 STATISTICAL_CONTEXT = re.compile(
-    r"(?i)(?:\bp\s*[<>=]|significativ|intervalo\s+de\s+confianza|"
-    r"nivel\s+de\s+significancia|\bic\s*\(|\bvalor\s+p\b|\balpha\b|\bα\b)"
+    r"(?i)(?:\bp\s*[<>=]|\bvalor\s+p\b|\bic\s*\(|\bnivel\s+de\s+significancia|\balpha\b|\bα\b|"
+    r"significativo\s*\(|no\s+significativo)"
 )
 BIB_HEADING = re.compile(
-    r"(?m)(?:^|\n)\s*BIBLIOGRAF[IÍ]A(?:\s*$|\s+(?=[A-ZÁÉÍÓÚÑ]))",
-    re.IGNORECASE | re.MULTILINE,
+    r"(?m)^\s*(?:[A-ZÁÉÍÓÚÑ]{2,12}\s+)?BIBLIOGRAF[IÍÁ][A-Z]*\s*$",
+    re.IGNORECASE,
 )
+BIB_HEADING_APA = re.compile(
+    r"(?m)^\s*BIBLIOGRAF[IÍÁ][A-Z]*\s+[A-ZÁÉÍÓÚÑ]",
+    re.IGNORECASE,
+)
+BIB_HEADING_NUMBERED = re.compile(
+    r"BIBLIOGRAF[IÍÁ][A-Z]*\s*\n\s*\d+\.\s",
+    re.IGNORECASE,
+)
+REFERENCIAS_HEADING = re.compile(r"(?m)^\s*REFERENCIAS\s*$", re.IGNORECASE)
+
+
+def _bibliography_start_positions(full_text: str) -> list[int]:
+    positions: list[int] = []
+    for pattern in (BIB_HEADING, BIB_HEADING_APA, BIB_HEADING_NUMBERED):
+        positions.extend(match.start() for match in pattern.finditer(full_text))
+    positions.extend(match.start() for match in REFERENCIAS_HEADING.finditer(full_text))
+    return positions
 RESEARCH_QUESTION = re.compile(
     r"¿[^?]+\?",
     re.MULTILINE,
@@ -69,19 +86,15 @@ def extract_text_from_docx(source: BinaryIO | str) -> str:
 
 
 def split_body_and_bibliography(full_text: str) -> tuple[str, str]:
-    match = list(BIB_HEADING.finditer(full_text))
-    if not match:
-        alt = re.search(r"(?m)(?:^|\n)\s*REFERENCIAS(?:\s*$|\s+(?=[A-ZÁÉÍÓÚÑ]))", full_text, re.I)
-        if alt:
-            idx = alt.start()
-            return full_text[:idx].strip(), full_text[idx:].strip()
-        return full_text, ""
-    idx = match[-1].start()
-    body = full_text[:idx].strip()
-    bib = full_text[idx:].strip()
-    bib = re.sub(r"^BIBLIOGRAF[IÍ]A\s*", "BIBLIOGRAFÍA\n", bib, flags=re.IGNORECASE)
-    bib = re.sub(r"^REFERENCIAS\s*", "REFERENCIAS\n", bib, flags=re.IGNORECASE)
-    return body, bib
+    positions = _bibliography_start_positions(full_text)
+    if positions:
+        idx = max(positions)
+        body = full_text[:idx].strip()
+        bib = full_text[idx:].strip()
+        bib = re.sub(r"^(?:[A-ZÁÉÍÓÚÑ]{2,12}\s+)?BIBLIOGRAF[IÍÁ][A-Z]*\s*", "BIBLIOGRAFÍA\n", bib, flags=re.IGNORECASE)
+        bib = re.sub(r"^REFERENCIAS\s*", "REFERENCIAS\n", bib, flags=re.IGNORECASE)
+        return body, bib
+    return full_text, ""
 
 
 def remove_index_duplicate(body: str) -> str:
@@ -269,7 +282,9 @@ def _is_false_positive_numeric_citation(chunk: str, body: str, start: int) -> bo
     numbers = [int(part) for part in parts]
     if 0 in numbers:
         return True
-    before = body[max(0, start - 120) : start]
+    if len(numbers) == 1 and 1 <= numbers[0] <= 200:
+        return False
+    before = body[max(0, start - 80) : start]
     if STATISTICAL_CONTEXT.search(before):
         if len(numbers) == 1 and numbers[0] > 100:
             return True
