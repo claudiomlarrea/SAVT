@@ -34,7 +34,7 @@ SEVERITY_FILTER_OPTIONS = [
 
 
 def render_header() -> None:
-    logo_col, hero_col = st.columns([1, 4], vertical_alignment="center")
+    logo_col, hero_col = st.columns([1, 4])
     with logo_col:
         st.image(LOGO_PATH, width=130)
     with hero_col:
