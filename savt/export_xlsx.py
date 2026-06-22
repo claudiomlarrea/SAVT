@@ -79,7 +79,24 @@ def build_report_xlsx(report: AuditReport, dashboard: dict) -> bytes:
         {"Campo": "Motivo principal", "Valor": dashboard.get("main_reason", "—")},
         {"Campo": "Checklist", "Valor": checklist.get("status", "—")},
         {"Campo": "Palabras (cuerpo)", "Valor": report.word_count},
-        {"Campo": "Referencias", "Valor": len(report.bibliography)},
+        {
+            "Campo": "Referencias en el texto",
+            "Valor": (dashboard.get("bibliography_dashboard") or {}).get("citations_found", 0),
+        },
+        {
+            "Campo": "Referencias en el capítulo de referencias (Bibliografía)",
+            "Valor": (dashboard.get("bibliography_dashboard") or {}).get(
+                "total_refs", len(report.bibliography)
+            ),
+        },
+        {
+            "Campo": "Páginas",
+            "Valor": report.metadata.get("pdf_page_count") or report.page_estimate,
+        },
+        {
+            "Campo": "Estilo de citación",
+            "Valor": (report.metadata.get("citation_style") or "—").upper(),
+        },
         {"Campo": "Errores críticos", "Valor": dashboard.get("errors", 0)},
         {"Campo": "Advertencias", "Valor": dashboard.get("warnings", 0)},
     ]
@@ -128,7 +145,7 @@ def build_report_xlsx(report: AuditReport, dashboard: dict) -> bytes:
                 "Apartado": item.get("title", ""),
                 "Detectado como": item.get("detected_as", ""),
                 "Palabras": item.get("words", 0),
-                "Citas": item.get("citation_count", 0),
+                "Apariciones cita": item.get("citation_count", 0),
                 "Densidad citas/100 pal.": item.get("citation_density", 0),
                 "Marcadores críticos": item.get("critical_markers", 0),
                 "Ind. hallazgos": item.get("result_markers", 0) or "—",

@@ -6,6 +6,7 @@ from typing import Any
 from savt.bibliography_styles import (
     apa_keys_match,
     citation_present_in_bibliography_text,
+    count_references_in_text,
     is_institutional_citation_key,
     topical_match,
 )
@@ -365,7 +366,7 @@ def build_bibliography_details(
     details = {
         "style": "APA" if style == "apa" else "Vancouver numerado",
         "total_refs": len(bibliography),
-        "citations_found": len(parsed.get("cited_numbers") or parsed.get("cited_keys", set())),
+        "citations_found": count_references_in_text(parsed, bibliography),
         "unmatched_count": unmatched_count,
         "unmatched_apa": unmatched_apa,
         "out_of_period": out_of_period,

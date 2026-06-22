@@ -125,10 +125,14 @@ def render_sidebar(report=None) -> "AuditConfig":
     check_content = st.sidebar.checkbox("Profundidad académica", value=True)
 
     if report:
+        bib_dash = (report.metadata.get("dashboard") or {}).get("bibliography_dashboard") or {}
+        refs_in_text = bib_dash.get("citations_found")
         with st.sidebar.expander("Datos técnicos del documento", expanded=False):
             st.write(f"Perfil: {report.metadata.get('profile_label', '—')}")
             st.write(f"Palabras (cuerpo): {report.word_count:,}")
-            st.write(f"Referencias: {len(report.bibliography)}")
+            if refs_in_text is not None:
+                st.write(f"Referencias en el texto: {refs_in_text}")
+            st.write(f"Referencias en Bibliografía: {len(report.bibliography)}")
             st.write(f"Estilo: {report.metadata.get('citation_style', '—').upper()}")
             if report.metadata.get("file_type") == "pdf":
                 st.write(f"Páginas PDF: {report.metadata.get('pdf_page_count', '—')}")
@@ -193,8 +197,9 @@ def render_technical_section_detail(dashboard: dict) -> None:
 
     with st.expander("Detalle técnico: métricas por apartado y cuadre de citas", expanded=False):
         st.caption(
-            "Vista analítica para revisión avanzada. Las observaciones accionables están en "
-            "«Apartados con observaciones»; el checklist resume el estado de cada capítulo."
+            "Vista analítica para revisión avanzada. «Apariciones cita» cuenta cada grupo "
+            "(1), (2,3) en el apartado; «N° refs distintos» son referencias únicas citadas ahí. "
+            "El total global de referencias citadas figura en Bibliografía y citación."
         )
         if section_audits:
             st.dataframe(section_audit_summary_rows(section_audits), hide_index=True)
@@ -373,14 +378,22 @@ def render_bibliography(dashboard: dict) -> None:
     details = bib.get("details") or {}
     st.markdown("## Bibliografía y citación")
 
+    unmatched = bib.get("unmatched_citations", 0)
+    citations_ok = unmatched == 0
+    coverage_ok = bib["coverage"] == "adecuada"
+    coverage_partial = bib["coverage"] not in ("adecuada", "—")
+
     summary_lines = [
-        f"{conformance_badge(True)} — Estilo {bib['style']} detectado",
-        f"{conformance_badge(True)} — {bib['total_refs']} referencias",
-        f"{conformance_badge(True)} — {bib['citations_found']} citas encontradas",
+        f"{conformance_badge(bib.get('style_ok', True))} — Estilo {bib['style']} detectado",
+        f"{conformance_badge(bib['total_refs'] > 0)} — {bib['total_refs']} entradas bibliográficas",
+        (
+            f"{conformance_badge(citations_ok, not citations_ok)} — "
+            f"{bib['citations_found']} referencias en el texto"
+        ),
     ]
-    if bib["unmatched_citations"]:
+    if unmatched:
         summary_lines.append(
-            f"{conformance_badge(False, True)} — {bib['unmatched_citations']} citas no emparejadas"
+            f"{conformance_badge(False, True)} — {unmatched} citas no emparejadas"
         )
     else:
         summary_lines.append(f"{conformance_badge(True)} — Citas emparejadas con bibliografía")
@@ -393,9 +406,8 @@ def render_bibliography(dashboard: dict) -> None:
             f"{conformance_badge(False, True)} — "
             f"{bib['possibly_off_topic']} referencias podrían no estar relacionadas con el tema"
         )
-    coverage_ok = bib["coverage"] == "adecuada"
     summary_lines.append(
-        f"{conformance_badge(coverage_ok, not coverage_ok and bib['coverage'] != '—')} — "
+        f"{conformance_badge(coverage_ok, coverage_partial)} — "
         f"Cobertura bibliográfica {bib['coverage']}"
     )
     for line in summary_lines:
@@ -581,19 +593,43 @@ def render_ethics(dashboard: dict) -> None:
 def render_document_data(dashboard: dict, report) -> None:
     content = dashboard.get("content_dashboard") or {}
     formal = dashboard.get("formal_dashboard") or {}
+    bib = dashboard.get("bibliography_dashboard") or {}
     st.markdown("## Datos del documento")
     st.caption(f"Perfil: {dashboard.get('profile_label', '—')}")
 
-    meta_cols = st.columns(4)
-    with meta_cols[0]:
+    refs_in_text = bib.get("citations_found", 0)
+    refs_in_bibliography = bib.get("total_refs", len(report.bibliography))
+    pages = report.metadata.get("pdf_page_count") or report.page_estimate
+    citation_style = report.metadata.get("citation_style", "—").upper()
+
+    row1 = st.columns(3)
+    with row1[0]:
         st.metric("Palabras (cuerpo)", f"{report.word_count:,}")
-    with meta_cols[1]:
-        st.metric("Referencias", len(report.bibliography))
-    with meta_cols[2]:
-        pages = report.metadata.get("pdf_page_count") or report.page_estimate
+    with row1[1]:
+        st.metric("Referencias en el texto", refs_in_text)
+    with row1[2]:
+        st.metric(
+            "Referencias en el capítulo de referencias (Bibliografía)",
+            refs_in_bibliography,
+        )
+
+    row2 = st.columns(2)
+    with row2[0]:
         st.metric("Páginas", pages)
-    with meta_cols[3]:
-        st.metric("Estilo de citación", report.metadata.get("citation_style", "—").upper())
+    with row2[1]:
+        st.metric("Estilo de citación", citation_style)
+
+    if refs_in_text != refs_in_bibliography:
+        delta = refs_in_text - refs_in_bibliography
+        if delta > 0:
+            st.caption(
+                f"Hay {delta} referencia(s) citada(s) en el texto sin entrada correspondiente "
+                "en el capítulo de referencias."
+            )
+        else:
+            st.caption(
+                f"Hay {abs(delta)} entrada(s) en bibliografía que no aparecen citadas en el texto."
+            )
 
     help_text = content.get("indicator_help") or {}
     if content.get("bibliography_words"):
@@ -625,8 +661,9 @@ def render_academic_depth(dashboard: dict) -> None:
     st.markdown("## Profundidad académica")
     help_text = content.get("indicator_help") or {}
     st.caption(
-        "Indicadores cuantitativos por apartado (extensión, citas, marcadores). "
-        "El estado conforme/no conforme figura en el checklist y en «Apartados con observaciones»."
+        "Indicadores cuantitativos por apartado (extensión, apariciones de cita, marcadores). "
+        "«Apariciones cita» no es el total de referencias únicas del documento. "
+        "El estado conforme figura en el checklist y en «Apartados con observaciones»."
     )
 
     section_depth = content.get("section_depth") or []
@@ -640,7 +677,7 @@ def render_academic_depth(dashboard: dict) -> None:
                 {
                     "Apartado": item.get("title", "—"),
                     "Palabras": item.get("words", 0),
-                    "Citas": item.get("citation_count", 0),
+                    "Apariciones cita": item.get("citation_count", 0),
                     "Marcadores críticos": item.get("critical_markers", 0),
                     "Ind. hallazgos": result_markers if result_markers else "—",
                     "Índice profundidad": item.get("depth_label", "—"),

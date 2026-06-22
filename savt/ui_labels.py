@@ -27,6 +27,26 @@ def readiness_conformance_label(status: str) -> str:
     }.get(status, "Parcialmente conforme")
 
 
+def conformance_from_review(ok: bool | None, partial: bool = False) -> str:
+    if ok is True:
+        return "Conforme"
+    if partial:
+        return "Parcialmente conforme"
+    if ok is False:
+        return "No conforme"
+    return "—"
+
+
+def depth_status_from_review(ok: bool | None, partial: bool = False) -> str:
+    if ok is True:
+        return "adequate"
+    if partial:
+        return "partial"
+    if ok is False:
+        return "weak"
+    return "missing"
+
+
 def conformance_badge(ok: bool, partial: bool = False) -> str:
     return conformance_badge_from_label(conformance_label(ok, partial))
 
