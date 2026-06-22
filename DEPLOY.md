@@ -32,15 +32,9 @@ No hace falta configurar secrets para el uso básico. La verificación DOI usa C
 
 ### Si el deploy falla o queda en "Your app is in the oven"
 
-Si los logs muestran error al compilar `pyarrow` o `pandas` (p. ej. `cmake failed`), la app se creó con dependencias viejas. Hacé **Reboot app** después de un `git push` reciente, o borrá la app y volvé a desplegar.
+Si los logs muestran que `numpy` o `pandas` se descargan como `.tar.gz` (código fuente) en lugar de `.whl`, el deploy intentará compilar y puede tardar horas o fallar. Usá las versiones del `requirements.txt` actual (con wheels para Python 3.14).
 
-El primer deploy puede tardar **5–10 minutos** (PyMuPDF es pesado). Esperá a ver en los logs:
-
-```text
-Processed dependencies!
-```
-
-y luego que arranque el servidor.
+Hacé **Reboot app** tras cada cambio en GitHub. El primer deploy puede tardar **5–10 minutos**.
 
 ## Paso 2 — Compartir la app
 
