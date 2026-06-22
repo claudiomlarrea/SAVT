@@ -75,7 +75,7 @@ def render_sidebar(report=None) -> AuditConfig:
     st.sidebar.caption(profile.description)
 
     verify_online = st.sidebar.checkbox("Verificar DOI online (Crossref)", value=True)
-    max_doi = st.sidebar.slider("Máximo de DOI a verificar", 5, 200, 200)
+    max_doi = st.sidebar.slider("Máximo de DOI a verificar", 5, 200, 50)
 
     min_pages = st.sidebar.number_input(
         "Páginas mínimas objetivo",
@@ -851,6 +851,18 @@ def render_bibliography_table(report) -> None:
 
 
 def main() -> None:
+    try:
+        _run_app()
+    except Exception as exc:
+        st.error("SAVT encontró un error inesperado. Detalle técnico:")
+        st.exception(exc)
+        st.info(
+            "Si el problema persiste, reinicie la app en Streamlit Cloud "
+            "(Manage app → Reboot app) o vuelva a ejecutar la auditoría."
+        )
+
+
+def _run_app() -> None:
     render_header()
     report = st.session_state.get("report")
     config = render_sidebar(report)
