@@ -23,19 +23,34 @@ Requisito: Python **3.10+** (recomendado 3.11, ver `.python-version`).
 1. Entrar en [https://share.streamlit.io](https://share.streamlit.io) con la cuenta de GitHub.
 2. Clic en **Create app**.
 3. Completar:
-   - **Repository:** `claudiomlarrea/SAVT` (o el nombre que haya usado)
+   - **Repository:** `claudiomlarrea/SAVT`
    - **Branch:** `main`
    - **Main file path:** `app.py`
-4. **Deploy**.
+4. **Advanced settings** → **Python version: 3.11** (obligatorio; no usar 3.14).
+5. **Deploy**.
 
 No hace falta configurar secrets para el uso básico. La verificación DOI usa Crossref (API pública).
 
 ### Si el deploy falla o queda en "Your app is in the oven"
 
-1. En **Manage app → Logs**, buscar errores de `pip` (p. ej. `pyarrow`, `numpy`).
-2. En **Advanced settings**, usar Python **3.11** o **3.13** (las dependencias actuales soportan ambos).
-3. **Reboot app** (tres puntos → Reboot) o borrar la app y volver a desplegarla.
-4. Verificar que el repo sea `claudiomlarrea/SAVT`, rama `main`, archivo `app.py`.
+El error más común en los logs es:
+
+```text
+Using Python 3.14.x environment
+× Failed to download and build `pyarrow==...`
+error: command 'cmake' failed: No such file or directory
+```
+
+**Causa:** Streamlit Cloud eligió Python **3.14** por defecto. `pyarrow` y `pandas` no tienen wheels para 3.14 y el build falla.
+
+**Solución (la única que funciona hoy):**
+
+1. **Borrá la app** en share.streamlit.io (no alcanza con Reboot).
+2. **Create app** de nuevo con los mismos datos.
+3. En **Advanced settings** elegí **Python 3.11**.
+4. Deploy y esperá 5–10 minutos.
+
+`packages.toml` y `.python-version` **no** cambian la versión en Streamlit Cloud: solo cuenta la que elegís en Advanced settings al crear la app.
 
 ## Paso 2 — Compartir la app
 

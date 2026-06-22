@@ -1,10 +1,10 @@
 streamlit==1.50.0
 pandas==2.2.3
 numpy==2.2.6
-pyarrow==18.1.0
 python-docx==1.1.2
 pymupdf==1.24.14
 openpyxl==3.1.5
 requests==2.32.3
 protobuf>=4.25.0,<6
 pillow>=10.4.0,<12
+packaging>=24,<26
