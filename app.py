@@ -6,13 +6,8 @@ import pandas as pd
 import streamlit as st
 
 from savt import __app_name__, __version__
-from savt.audit import run_audit
 from savt.audit_config import AuditConfig
-from savt.export_docx import build_report_docx
-from savt.export_xlsx import build_report_xlsx
 from savt.institutional_profiles import PROFILES, profile_options
-from savt.report_builder import findings_dataframe_rows
-from savt.section_audit import section_audit_summary_rows
 from savt.taxonomy import AUDIT_AREAS, SEVERITY_LABELS
 from savt.ui_branding import LOGO_PATH, inject_branding
 from savt.ui_labels import conformance_badge, conformance_label, readiness_conformance_badge
@@ -36,7 +31,8 @@ SEVERITY_FILTER_OPTIONS = [
 def render_header() -> None:
     logo_col, hero_col = st.columns([1, 4])
     with logo_col:
-        st.image(LOGO_PATH, width=130)
+        if LOGO_PATH.exists():
+            st.image(str(LOGO_PATH), width=130)
     with hero_col:
         st.markdown(
             f"""
@@ -56,7 +52,8 @@ def render_header() -> None:
 
 
 def render_sidebar(report=None) -> AuditConfig:
-    st.sidebar.image(LOGO_PATH, width=120)
+    if LOGO_PATH.exists():
+        st.sidebar.image(str(LOGO_PATH), width=120)
     st.sidebar.header("Configuración")
 
     profile_ids = [p[0] for p in profile_options()]
@@ -181,6 +178,8 @@ def render_detected_sections(dashboard: dict) -> None:
 
 def render_technical_section_detail(dashboard: dict) -> None:
     """Métricas por apartado y cuadre de citas — colapsado para no duplicar el informe principal."""
+    from savt.section_audit import section_audit_summary_rows
+
     section_audits = dashboard.get("section_audits") or []
     reconciliation = dashboard.get("citation_reconciliation") or {}
     if not section_audits and not reconciliation.get("reconciliation_rows"):
@@ -689,6 +688,8 @@ def render_originality(dashboard: dict) -> None:
 
 
 def render_findings_table(report) -> None:
+    from savt.report_builder import findings_dataframe_rows
+
     with st.expander("Detalle completo de hallazgos (filtros avanzados)", expanded=False):
         rows = findings_dataframe_rows(report)
         ok_rows = []
@@ -731,6 +732,10 @@ def render_findings_table(report) -> None:
 
 
 def render_final_report(report, dashboard: dict, base_name: str) -> None:
+    from savt.export_docx import build_report_docx
+    from savt.export_xlsx import build_report_xlsx
+    from savt.report_builder import findings_dataframe_rows
+
     st.markdown("## Informe final SAVT")
     st.caption(
         "Descargue el informe completo en Excel o Word, o explore el detalle tabular de hallazgos."
@@ -886,6 +891,8 @@ def main() -> None:
                 preview_box.dataframe(preview_rows, use_container_width=True, hide_index=True)
 
         with st.spinner("Analizando tesis…"):
+            from savt.audit import run_audit
+
             report = run_audit(
                 io.BytesIO(uploaded.getvalue()),
                 filename=uploaded.name,

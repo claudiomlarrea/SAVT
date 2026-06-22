@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import streamlit as st
 
 # Manual de identidad visual UCCuyo v1.0 (2017)
@@ -13,7 +15,7 @@ UCCUYO_GRAY = "#808080"
 UCCUYO_TEXT = "#333333"
 UCCUYO_BG_SOFT = "#eef4f0"
 
-LOGO_PATH = "assets/oia_uccuyo_logo.jpg"
+LOGO_PATH = Path(__file__).resolve().parent.parent / "assets" / "oia_uccuyo_logo.jpg"
 
 
 def inject_branding() -> None:
