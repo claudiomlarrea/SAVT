@@ -352,7 +352,10 @@ def count_references_in_text(parsed: dict, bibliography: dict[int, ReferenceEntr
             if len(author) >= 4:
                 cleaned.add(key)
         return len(cleaned)
-    return len(parsed.get("cited_numbers") or set())
+    from savt.parser import extract_cited_numbers
+
+    max_ref = max(bibliography.keys(), default=500)
+    return len(extract_cited_numbers(parsed.get("body", ""), max_ref=max_ref))
 
 
 def extract_apa_citations(body: str) -> tuple[set[str], list[tuple[str, str]]]:
