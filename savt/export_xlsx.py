@@ -9,6 +9,7 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
+from savt import __app_name__, __version__
 from savt.ui_labels import citation_style_label
 from savt.models import AuditReport
 from savt.report_builder import display_title, findings_dataframe_rows, gravity_label
