@@ -10,7 +10,11 @@ import streamlit as st
 
 def _lazy_ui():
     from savt.ui_branding import LOGO_PATH, inject_branding
-    from savt.ui_labels import conformance_badge, conformance_label, readiness_conformance_badge
+    from savt.ui_labels import (
+        conformance_badge,
+        conformance_label,
+        readiness_conformance_badge,
+    )
 
     inject_branding()
     return LOGO_PATH, conformance_badge, conformance_label, readiness_conformance_badge
@@ -125,11 +129,16 @@ def render_sidebar(report=None) -> "AuditConfig":
     check_content = st.sidebar.checkbox("Profundidad académica", value=True)
 
     if report:
+        from savt.ui_labels import citation_style_label
+
+        bib_dash = (report.metadata.get("dashboard") or {}).get("bibliography_dashboard") or {}
+        refs_used = bib_dash.get("citations_found")
         with st.sidebar.expander("Datos técnicos del documento", expanded=False):
             st.write(f"Perfil: {report.metadata.get('profile_label', '—')}")
             st.write(f"Palabras (cuerpo): {report.word_count:,}")
-            st.write(f"Referencias: {len(report.bibliography)}")
-            st.write(f"Estilo: {report.metadata.get('citation_style', '—').upper()}")
+            if refs_used is not None:
+                st.write(f"Referencias totales utilizadas: {refs_used}")
+            st.write(f"Estilo: {citation_style_label(report.metadata.get('citation_style'))}")
             if report.metadata.get("file_type") == "pdf":
                 st.write(f"Páginas PDF: {report.metadata.get('pdf_page_count', '—')}")
             else:
@@ -138,6 +147,16 @@ def render_sidebar(report=None) -> "AuditConfig":
                 st.warning(f"Extensión fuera del rango {min_pages}–{max_pages} páginas.")
 
     st.sidebar.markdown("---")
+    usage_count = st.session_state.get("usage_count")
+    if usage_count is None:
+        try:
+            from savt.usage_counter import get_usage_count
+
+            usage_count = get_usage_count()
+        except Exception:
+            usage_count = None
+    if usage_count is not None:
+        st.sidebar.caption(f"Auditorías realizadas: {usage_count:,}")
     st.sidebar.caption(f"Versión {__version__} · Python {sys.version.split()[0]}")
 
     return AuditConfig(
@@ -187,28 +206,16 @@ def render_technical_section_detail(dashboard: dict) -> None:
     from savt.section_audit import section_audit_summary_rows
 
     section_audits = dashboard.get("section_audits") or []
-    reconciliation = dashboard.get("citation_reconciliation") or {}
-    if not section_audits and not reconciliation.get("reconciliation_rows"):
+    if not section_audits:
         return
 
-    with st.expander("Detalle técnico: métricas por apartado y cuadre de citas", expanded=False):
+    with st.expander("Detalle técnico: métricas por apartado", expanded=False):
         st.caption(
-            "Vista analítica para revisión avanzada. Las observaciones accionables están en "
-            "«Apartados con observaciones»; el checklist resume el estado de cada capítulo."
+            "Vista analítica para revisión avanzada. «Apariciones cita» cuenta cada grupo "
+            "(1), (2,3) en el apartado; «N° refs distintos» son referencias únicas citadas ahí."
         )
         if section_audits:
             st.dataframe(section_audit_summary_rows(section_audits), hide_index=True)
-        recon_rows = reconciliation.get("reconciliation_rows") or []
-        if recon_rows:
-            st.markdown("**Cuadre de citas y referencias**")
-            st.dataframe(recon_rows, hide_index=True)
-            for note in reconciliation.get("notes") or []:
-                if "Coincide" in note:
-                    st.caption(f"✓ {note}")
-                elif "Diferencia" in note or "Alerta" in note:
-                    st.warning(note)
-                else:
-                    st.caption(note)
 
 
 def render_verdict(dashboard: dict) -> None:
@@ -373,17 +380,17 @@ def render_bibliography(dashboard: dict) -> None:
     details = bib.get("details") or {}
     st.markdown("## Bibliografía y citación")
 
+    unmatched = bib.get("unmatched_citations", 0)
+    coverage_ok = bib["coverage"] == "adecuada"
+    coverage_partial = bib["coverage"] not in ("adecuada", "—")
+
     summary_lines = [
-        f"{conformance_badge(True)} — Estilo {bib['style']} detectado",
-        f"{conformance_badge(True)} — {bib['total_refs']} referencias",
-        f"{conformance_badge(True)} — {bib['citations_found']} citas encontradas",
+        f"{conformance_badge(bib.get('style_ok', True))} — Estilo {bib['style']} detectado",
+        (
+            f"{conformance_badge(bib.get('citations_found', 0) > 0)} — "
+            f"{bib.get('citations_found', 0)} referencias totales utilizadas"
+        ),
     ]
-    if bib["unmatched_citations"]:
-        summary_lines.append(
-            f"{conformance_badge(False, True)} — {bib['unmatched_citations']} citas no emparejadas"
-        )
-    else:
-        summary_lines.append(f"{conformance_badge(True)} — Citas emparejadas con bibliografía")
     if bib["out_of_period"]:
         summary_lines.append(
             f"{conformance_badge(False, True)} — {bib['out_of_period']} referencias fuera del período metodológico"
@@ -393,9 +400,8 @@ def render_bibliography(dashboard: dict) -> None:
             f"{conformance_badge(False, True)} — "
             f"{bib['possibly_off_topic']} referencias podrían no estar relacionadas con el tema"
         )
-    coverage_ok = bib["coverage"] == "adecuada"
     summary_lines.append(
-        f"{conformance_badge(coverage_ok, not coverage_ok and bib['coverage'] != '—')} — "
+        f"{conformance_badge(coverage_ok, coverage_partial)} — "
         f"Cobertura bibliográfica {bib['coverage']}"
     )
     for line in summary_lines:
@@ -579,21 +585,29 @@ def render_ethics(dashboard: dict) -> None:
 
 
 def render_document_data(dashboard: dict, report) -> None:
+    from savt.ui_labels import citation_style_label
+
     content = dashboard.get("content_dashboard") or {}
     formal = dashboard.get("formal_dashboard") or {}
+    bib = dashboard.get("bibliography_dashboard") or {}
     st.markdown("## Datos del documento")
     st.caption(f"Perfil: {dashboard.get('profile_label', '—')}")
 
-    meta_cols = st.columns(4)
-    with meta_cols[0]:
+    refs_used = bib.get("citations_found", 0)
+    pages = report.metadata.get("pdf_page_count") or report.page_estimate
+    citation_style = citation_style_label(report.metadata.get("citation_style"))
+
+    row1 = st.columns(2)
+    with row1[0]:
         st.metric("Palabras (cuerpo)", f"{report.word_count:,}")
-    with meta_cols[1]:
-        st.metric("Referencias", len(report.bibliography))
-    with meta_cols[2]:
-        pages = report.metadata.get("pdf_page_count") or report.page_estimate
+    with row1[1]:
+        st.metric("Referencias totales utilizadas", refs_used)
+
+    row2 = st.columns(2)
+    with row2[0]:
         st.metric("Páginas", pages)
-    with meta_cols[3]:
-        st.metric("Estilo de citación", report.metadata.get("citation_style", "—").upper())
+    with row2[1]:
+        st.metric("Estilo de citación", citation_style)
 
     help_text = content.get("indicator_help") or {}
     if content.get("bibliography_words"):
@@ -625,8 +639,9 @@ def render_academic_depth(dashboard: dict) -> None:
     st.markdown("## Profundidad académica")
     help_text = content.get("indicator_help") or {}
     st.caption(
-        "Indicadores cuantitativos por apartado (extensión, citas, marcadores). "
-        "El estado conforme/no conforme figura en el checklist y en «Apartados con observaciones»."
+        "Indicadores cuantitativos por apartado (extensión, apariciones de cita, marcadores). "
+        "«Apariciones cita» no es el total de referencias únicas del documento. "
+        "El estado conforme figura en el checklist y en «Apartados con observaciones»."
     )
 
     section_depth = content.get("section_depth") or []
@@ -640,7 +655,7 @@ def render_academic_depth(dashboard: dict) -> None:
                 {
                     "Apartado": item.get("title", "—"),
                     "Palabras": item.get("words", 0),
-                    "Citas": item.get("citation_count", 0),
+                    "Apariciones cita": item.get("citation_count", 0),
                     "Marcadores críticos": item.get("critical_markers", 0),
                     "Ind. hallazgos": result_markers if result_markers else "—",
                     "Índice profundidad": item.get("depth_label", "—"),
@@ -932,6 +947,14 @@ def _run_app() -> None:
         progress_bar.progress(1.0)
         status_box.success("Auditoría completada.")
         preview_box.empty()
+        try:
+            from savt.usage_counter import record_audit_usage
+
+            usage_count = record_audit_usage()
+            if usage_count is not None:
+                st.session_state["usage_count"] = usage_count
+        except Exception:
+            pass
         st.session_state["report"] = report
         st.session_state["profile_id"] = config.profile_id
         st.rerun()

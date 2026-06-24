@@ -25,10 +25,14 @@ def collapse_soft_line_breaks(text: str) -> str:
         if not buffer:
             buffer = stripped
             continue
+        if re.match(r"^\d+\.", stripped):
+            flush()
+            buffer = stripped
+            continue
         if buffer.endswith("-") and stripped[:1].islower():
             buffer = buffer[:-1] + stripped
             continue
-        if buffer.endswith((".", "?", "!", ":", ";")) or re.match(r"^\d+\.", stripped):
+        if buffer.endswith((".", "?", "!", ":", ";")):
             flush()
             buffer = stripped
             continue
@@ -60,6 +64,12 @@ def normalize_bibliography_text(bib_text: str) -> str:
     text = re.sub(r"-\s*\n\s*", "-", text)
     text = re.sub(r"https?://doi\.org/https?://doi\.org/", "https://doi.org/", text, flags=re.I)
     text = re.sub(r"doi\.org/(https?://doi\.org/)", "doi.org/", text, flags=re.I)
+    # URL partida en guion + número de referencia con autor en la línea siguiente.
+    text = re.sub(
+        r"([/\w])-(\d+\.\s*(?:\n\s*)?[A-ZÁÉÍÓÚ][^\n]{3,120}?,\s)",
+        r"\1-\n\2",
+        text,
+    )
     return text
 
 

@@ -364,9 +364,7 @@ def build_report_docx(report: AuditReport, dashboard: dict) -> bytes:
     bib = dashboard.get("bibliography_dashboard", {})
     lines = [
         f"Estilo: {bib.get('style', '—')}",
-        f"Total referencias: {bib.get('total_refs', 0)}",
-        f"Citas en texto: {bib.get('citations_found', 0)}",
-        f"Citas no emparejadas: {bib.get('unmatched_citations', 0)}",
+        f"Referencias totales utilizadas: {bib.get('citations_found', 0)}",
         f"Fuera del período metodológico: {bib.get('out_of_period', 0)}",
         f"Posiblemente ajenas al tema: {bib.get('possibly_off_topic', 0)}",
         f"Cobertura: {bib.get('coverage', '—')}",

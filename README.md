@@ -33,7 +33,7 @@ Herramienta institucional para **pre-auditar** tesis (TFI, Maestría, Doctorado)
 ```bash
 git clone https://github.com/claudiomlarrea/SAVT.git
 cd SAVT
-python3 -m venv .venv
+python3.11 -m venv .venv   # Python 3.10+ requerido
 source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 streamlit run app.py

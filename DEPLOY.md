@@ -2,59 +2,41 @@
 
 ## Estado actual
 
-- Repositorio **git local** listo en `main` (commit inicial v0.2).
-- **Pendiente:** subir a GitHub (requiere reautenticar `gh`).
+- Repositorio publicado: https://github.com/claudiomlarrea/SAVT
+- **Pendiente:** desplegar o redeploy en Streamlit Cloud (la app `savt-claudiomlarrea.streamlit.app` devuelve 404 si aún no se creó o falló el deploy).
 
-## Paso 1 — Reautenticar GitHub CLI
-
-En **Terminal** (fuera de Cursor, si hace falta):
+## Instalación local (desde cero)
 
 ```bash
-gh auth login -h github.com --web
+git clone https://github.com/claudiomlarrea/SAVT.git
+cd SAVT
+python3.11 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+streamlit run app.py
 ```
 
-Elegí: GitHub.com → HTTPS → Login with a web browser.
+Requisito: Python **3.10+** (recomendado 3.11, ver `.python-version`).
 
-## Paso 2 — Publicar en GitHub
-
-```bash
-cd ~/Documents/Sistema-Auditoria-Verificacion-Tesis
-./scripts/publish.sh
-```
-
-Si el nombre `SAVT` ya está ocupado:
-
-```bash
-./scripts/publish.sh sistema-auditoria-verificacion-tesis
-```
-
-Comando manual equivalente:
-
-```bash
-cd ~/Documents/Sistema-Auditoria-Verificacion-Tesis
-gh repo create SAVT --public --source=. --remote=origin --push
-```
-
-## Paso 3 — Desplegar en Streamlit Cloud
+## Paso 1 — Desplegar en Streamlit Cloud
 
 1. Entrar en [https://share.streamlit.io](https://share.streamlit.io) con la cuenta de GitHub.
 2. Clic en **Create app**.
 3. Completar:
-   - **Repository:** `claudiomlarrea/SAVT` (o el nombre que haya usado)
+   - **Repository:** `claudiomlarrea/SAVT`
    - **Branch:** `main`
    - **Main file path:** `app.py`
-4. **Deploy**.
+4. **Deploy** (Python 3.11 o 3.14; las dependencias actuales soportan ambos).
 
 No hace falta configurar secrets para el uso básico. La verificación DOI usa Crossref (API pública).
 
-### Si el deploy falla
+### Si el deploy falla o queda en "Your app is in the oven"
 
-- Verificar que `requirements.txt` esté en la raíz.
-- Python 3.10 (definido en `.python-version` y `packages.toml`).
-- Revisar logs en Streamlit Cloud → Manage app → Logs.
-- PyMuPDF puede tardar unos minutos en instalar en el primer deploy.
+Si los logs muestran que `numpy` o `pandas` se descargan como `.tar.gz` (código fuente) en lugar de `.whl`, el deploy intentará compilar y puede tardar horas o fallar. Usá las versiones del `requirements.txt` actual (con wheels para Python 3.14).
 
-## Paso 4 — Compartir la app
+Hacé **Reboot app** tras cada cambio en GitHub. El primer deploy puede tardar **5–10 minutos**.
+
+## Paso 2 — Compartir la app
 
 Tras el deploy, Streamlit asigna una URL como:
 
@@ -67,7 +49,7 @@ Tras el deploy, Streamlit asigna una URL como:
 Cada cambio que suba a `main` puede redeployarse automáticamente si activó **Auto-redeploy** en Streamlit Cloud:
 
 ```bash
-cd ~/Documents/Sistema-Auditoria-Verificacion-Tesis
+cd SAVT
 git add .
 git commit -m "Descripción del cambio"
 git push

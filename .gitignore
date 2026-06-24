@@ -7,6 +7,7 @@ __pycache__/
 .DS_Store
 .env
 .streamlit/secrets.toml
+.savt_usage/
 *.egg-info/
 dist/
 build/

@@ -291,6 +291,73 @@ def parse_apa_bibliography(bib_text: str) -> dict[int, ReferenceEntry]:
     return entries
 
 
+NARRATIVE_APA_PATTERN = re.compile(
+    r"([A-ZÁÉÍÓÚÑ][\wÁÉÍÓÚáéíóúñ''\-\.]+(?:\s+(?:y|&)\s+[\wÁÉÍÓÚáéíóúñ''\-\.]+)+)\s*\((\d{4}[a-z]?)\)",
+)
+NARRATIVE_APA_ET_AL_PATTERN = re.compile(
+    r"([A-ZÁÉÍÓÚÑ][\wÁÉÍÓÚáéíóúñ''\-\.\s]{2,80}?\s+et al\.)\s*\((\d{4}[a-z]?)\)",
+)
+
+
+def _narrative_author_surnames(author_text: str) -> list[str]:
+    author_text = author_text.strip()
+    if not author_text:
+        return []
+    if re.search(r"\bet al\.\s*$", author_text, re.IGNORECASE):
+        author_text = re.sub(r"\s+et al\.\s*$", "", author_text, flags=re.IGNORECASE).strip()
+    parts = re.split(r"\s+(?:y|&)\s+", author_text, flags=re.IGNORECASE)
+    return [normalize_author(extract_surname(part.strip())) for part in parts if part.strip()]
+
+
+def extract_narrative_apa_keys(body: str, bibliography: dict[int, ReferenceEntry]) -> set[str]:
+    """Citas narrativas APA del tipo «Autor (año)» o «Autor et al. (año)»."""
+    keys: set[str] = set()
+    if not body or not bibliography:
+        return keys
+    matches: list[tuple[str, str]] = []
+    for pattern in (NARRATIVE_APA_PATTERN, NARRATIVE_APA_ET_AL_PATTERN):
+        for match in pattern.finditer(body):
+            matches.append((match.group(1).strip(), match.group(2)[:4]))
+    for author_text, year in matches:
+        surnames = _narrative_author_surnames(author_text)
+        for ref in bibliography.values():
+            if not ref.key or not (ref.year or "").startswith(year):
+                continue
+            bib_author = ref.key.split("|", 1)[0]
+            for surname in surnames:
+                if not surname:
+                    continue
+                if surname == bib_author or surname in bib_author or bib_author in surname:
+                    keys.add(ref.key)
+                    break
+    return keys
+
+
+def count_references_in_text(parsed: dict, bibliography: dict[int, ReferenceEntry]) -> int:
+    """Fuentes distintas citadas en el cuerpo (parentéticas + narrativas APA, sin falsos positivos)."""
+    style = parsed.get("citation_style", "numeric")
+    if style == "apa":
+        bib_keys = {ref.key for ref in bibliography.values() if ref.key}
+        keys = set(parsed.get("cited_keys") or set())
+        keys |= extract_narrative_apa_keys(parsed.get("body", ""), bibliography)
+        cleaned: set[str] = set()
+        for key in keys:
+            in_bib = any(apa_keys_match(key, {bib_key}) for bib_key in bib_keys)
+            if is_institutional_citation_key(key) and not in_bib:
+                continue
+            if in_bib:
+                cleaned.add(key)
+                continue
+            author = key.split("|", 1)[0] if "|" in key else key
+            if len(author) >= 4:
+                cleaned.add(key)
+        return len(cleaned)
+    from savt.parser import extract_cited_numbers
+
+    max_ref = max(bibliography.keys(), default=500)
+    return len(extract_cited_numbers(parsed.get("body", ""), max_ref=max_ref))
+
+
 def extract_apa_citations(body: str) -> tuple[set[str], list[tuple[str, str]]]:
     cited_keys: set[str] = set()
     contexts: list[tuple[str, str]] = []

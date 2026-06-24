@@ -6,9 +6,11 @@ from typing import Callable, Optional
 
 from savt.bibliography_styles import extract_apa_citations
 from savt.chapter_reviews import CHECK_LABELS, SECTION_TITLES
+from savt.content_quality import DEPTH_STATUS_LABELS
+from savt.ui_labels import conformance_from_review, depth_status_from_review
 from savt.content_quality import _count_citations
 from savt.models import AuditReport, Finding
-from savt.parser import extract_cited_numbers
+from savt.parser import extract_cited_numbers, _numbered_bibliography_max
 from savt.word_stats import CANONICAL_SECTION_ORDER, count_words, get_section_word_partition
 
 ProgressCallback = Callable[[str, str, float, Optional[dict]], None]
@@ -161,7 +163,7 @@ def build_citation_reconciliation(
     """
     style = (parsed.get("citation_style") or report.metadata.get("citation_style") or "numbered").lower()
     body = parsed.get("body", "")
-    max_ref = max(report.bibliography.keys(), default=500) if report.bibliography else 500
+    max_ref = _numbered_bibliography_max(report.bibliography) if report.bibliography else 500
     role_texts, _ = get_section_word_partition(parsed)
 
     section_rows: list[dict] = []
@@ -298,7 +300,7 @@ def build_section_audits(
     role_texts: dict[str, str] = {}
     if parsed and report:
         style = (parsed.get("citation_style") or "numbered").lower()
-        max_ref = max(report.bibliography.keys(), default=500) if report.bibliography else 500
+        max_ref = _numbered_bibliography_max(report.bibliography) if report.bibliography else 500
         role_texts, _ = get_section_word_partition(parsed)
 
     audits: list[dict] = []
@@ -312,13 +314,8 @@ def build_section_audits(
 
         ok = review.get("ok")
         partial = review.get("partial", False)
-        if ok is True:
-            conformance = "Conforme"
-        elif partial:
-            conformance = "Parcialmente conforme"
-        elif ok is False:
-            conformance = "No conforme"
-        else:
+        conformance = conformance_from_review(ok, partial)
+        if conformance == "—":
             conformance = depth.get("depth_label", "—")
 
         unique_refs = depth.get("unique_refs_cited", 0)
@@ -372,6 +369,10 @@ def build_section_audits(
             body_total = sum(s.get("words", 0) for s in detected_sections)
             if body_total:
                 bib_pct = f"{round(bib_words * 100 / (body_total + bib_words), 1):.1f}%"
+        bib_ok = bib_review.get("ok")
+        bib_partial = bib_review.get("partial", False)
+        bib_conformance = conformance_from_review(bib_ok, bib_partial)
+        bib_depth_status = depth_status_from_review(bib_ok, bib_partial)
         audits.append(
             {
                 "role": "bibliografia",
@@ -387,12 +388,12 @@ def build_section_audits(
                 "citation_density": 0,
                 "critical_markers": 0,
                 "result_markers": 0,
-                "depth_status": "adequate" if bib_review.get("ok") else "weak",
-                "depth_label": "Conforme" if bib_review.get("ok") else "No conforme",
+                "depth_status": bib_depth_status,
+                "depth_label": DEPTH_STATUS_LABELS.get(bib_depth_status, bib_conformance),
                 "depth_reason": bib_review.get("summary", ""),
-                "conformance": "Conforme" if bib_review.get("ok") else "No conforme",
-                "review_ok": bib_review.get("ok"),
-                "review_partial": bib_review.get("partial", False),
+                "conformance": bib_conformance,
+                "review_ok": bib_ok,
+                "review_partial": bib_partial,
                 "review_summary": bib_review.get("summary", ""),
                 "checks": bib_review.get("checks") or [],
                 "checks_passed": 0,

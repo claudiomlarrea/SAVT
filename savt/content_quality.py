@@ -75,7 +75,9 @@ CHECKLIST_ALIGNED_ROLES: dict[str, str] = {
 
 
 def _count_citations(text: str) -> int:
-    cites = len(re.findall(r"\(\d+(?:[,\s\-–]\d+)*\)", text))
+    from savt.parser import count_numeric_citation_appearances
+
+    cites = count_numeric_citation_appearances(text)
     cites += len(re.findall(r"\([A-ZÁÉÍÓÚÑ][^)]*,\s*\d{4}", text))
     return cites
 
