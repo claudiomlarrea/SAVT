@@ -655,7 +655,7 @@ def _find_objetivos_start(body: str, *, before_pos: int | None = None) -> tuple[
 
 
 _CHAPTER_LINE = re.compile(
-    r"(?m)(?:^|\n)\s*CAP[ÍI]TULO\s+([IVXLC\d]+)\s*[:\-–]\s*(.+)$",
+    r"(?m)(?:^|\n)\s*CAP[ÍI]TULO\s+([IVXLC\d]+)\s*[:\-–.]\s*(.+)$",
     re.IGNORECASE,
 )
 _CHAPTER_INLINE_TITLE_STOP = re.compile(

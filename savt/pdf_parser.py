@@ -46,13 +46,13 @@ def remove_pdf_toc_lines(text: str) -> str:
 def remove_pdf_front_matter(body: str) -> str:
     """Recorta portada, índice y metadatos previos al inicio del cuerpo argumental."""
     markers = [
-        # PDF: el encabezado suele ir en la misma línea que el primer párrafo.
-        r"(?im)(?:^|\n)\s*INTRODUCCI[ÓO]N\b",
-        r"1\.\s+Planteamiento general\s*\n",
+        # Preferir anclas explícitas; evitar «Introducción La…» en el cuerpo (falso positivo).
+        r"CAPÍTULO I\.\s*INTRODUCCIÓN\b",
         r"1\.1\s+Presentaci[oó]n del tema\s*\n",
-        r"CAPÍTULO I\.\s*INTRODUCCIÓN\s*\n",
+        r"1\.\s+Planteamiento general\s*\n",
         r"1\.\s+Introducci[oó]n\s*\n",
-        r"(?m)^INTRODUCCI[ÓO]N\s*\n",
+        r"(?m)^\s*INTRODUCCI[ÓO]N\s*$",
+        r"(?m)^\s*\d+\.\s*INTRODUCCI[ÓO]N\s*$",
         r"Presentaci[oó]n del Trabajo(?: de Tesis| Final)?\s*\n",
     ]
     for pattern in markers:

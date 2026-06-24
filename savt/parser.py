@@ -182,9 +182,17 @@ def extract_cited_numbers(body: str, max_ref: int = 500) -> set[int]:
         for part in re.split(r"[,\s\-–]+", chunk):
             if part.isdigit():
                 num = int(part)
+                if 1900 <= num <= 2039:
+                    continue
                 if 1 <= num <= max_ref:
                     cited.add(num)
     return cited
+
+
+def _numbered_bibliography_max(bibliography: dict[int, ReferenceEntry]) -> int:
+    """Índice máximo plausible de referencias numeradas (excluye PMIDs mal parseados)."""
+    valid = [k for k in bibliography if 1 <= k <= 500]
+    return max(valid) if valid else 500
 
 
 def extract_citation_contexts(body: str, max_ref: int = 500) -> list[tuple[int, str]]:
@@ -371,10 +379,9 @@ def parse_thesis_file(source: BinaryIO | str, filename: str = "tesis.docx") -> d
         citation_contexts_keys: list[tuple[str, str]] = citation_contexts
     else:
         cited_keys = set()
-        cited_numbers = extract_cited_numbers(body, max_ref=max(bibliography.keys(), default=500))
-        citation_contexts_numbered = extract_citation_contexts(
-            body, max_ref=max(bibliography.keys(), default=500)
-        )
+        bib_max = _numbered_bibliography_max(bibliography)
+        cited_numbers = extract_cited_numbers(body, max_ref=bib_max)
+        citation_contexts_numbered = extract_citation_contexts(body, max_ref=bib_max)
         citation_contexts_keys = []
 
     bib_words = count_words(bib_text)
