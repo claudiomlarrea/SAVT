@@ -355,24 +355,9 @@ def count_references_in_text(parsed: dict, bibliography: dict[int, ReferenceEntr
 
 
 def extract_apa_citations(body: str) -> tuple[set[str], list[tuple[str, str]]]:
-    cited_keys: set[str] = set()
-    contexts: list[tuple[str, str]] = []
-    paragraphs = [p.strip() for p in re.split(r"\n{2,}", body) if len(p.split()) > 8]
-    citation_patterns = (APA_CITATION_PATTERN, BRACKET_APA_CITATION_PATTERN)
-    for paragraph in paragraphs:
-        keys_in_paragraph: set[str] = set()
-        for pattern in citation_patterns:
-            for match in pattern.finditer(paragraph):
-                inner = re.sub(r"\s+", " ", match.group(1)).strip()
-                if not re.search(r"[A-Za-zÁÉÍÓÚáéíóúñ]{3}.*,\s*\d{4}", inner):
-                    continue
-                key = apa_citation_key(inner)
-                if key:
-                    keys_in_paragraph.add(key)
-        for key in keys_in_paragraph:
-            cited_keys.add(key)
-            contexts.append((key, paragraph))
-    return cited_keys, contexts
+    from savt.citations import extract_apa_citations as _extract
+
+    return _extract(body)
 
 
 def parse_bibliography_by_style(bib_text: str, style: str) -> dict[int, ReferenceEntry]:

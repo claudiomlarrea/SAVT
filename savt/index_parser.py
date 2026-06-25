@@ -47,8 +47,37 @@ _INDEX_KEYWORD_SIGNALS: tuple[tuple[str, int], ...] = (
     (r"\bcontenido\b", 6),
 )
 _MIN_BLOCK_SCORE = 8
+_MIN_TOP_LEVEL_SECTIONS = 5
+_ORDINAL_WORDS: dict[str, str] = {
+    "primero": "1",
+    "primera": "1",
+    "segundo": "2",
+    "segunda": "2",
+    "tercero": "3",
+    "tercera": "3",
+    "cuarto": "4",
+    "cuarta": "4",
+    "quinto": "5",
+    "quinta": "5",
+    "sexto": "6",
+    "sexta": "6",
+    "septimo": "7",
+    "séptimo": "7",
+    "septima": "7",
+    "séptima": "7",
+    "octavo": "8",
+    "octava": "8",
+    "noveno": "9",
+    "novena": "9",
+    "decimo": "10",
+    "décimo": "10",
+    "decima": "10",
+    "décima": "10",
+}
+_ORDINAL_WORD_PATTERN = "|".join(re.escape(word) for word in sorted(_ORDINAL_WORDS, key=len, reverse=True))
 
 _INDEX_BLOCK_DIAGNOSTIC: dict | None = None
+_INDEX_PARSE_DIAGNOSTIC: dict | None = None
 
 
 @dataclass(frozen=True)
@@ -80,6 +109,29 @@ def roman_to_int(value: str) -> int:
             total += current
         prev = current
     return total
+
+
+def _normalize_section_number(raw: str) -> str | None:
+    """Convierte 1, 1-, I, A, primero, etc. al formato interno «1», «2», …"""
+    token = raw.strip().rstrip(".-:)")
+    if not token:
+        return None
+    lower = token.lower()
+    if lower in _ORDINAL_WORDS:
+        return _ORDINAL_WORDS[lower]
+    if token.isdigit():
+        return str(int(token))
+    if _ROMAN.match(token):
+        value = roman_to_int(token)
+        return str(value) if value > 0 else None
+    if re.fullmatch(r"[A-Z]", token, re.IGNORECASE):
+        return str(ord(token.upper()) - ord("A") + 1)
+    return None
+
+
+def get_index_parse_diagnostic() -> dict | None:
+    """Última decisión entre parser estricto y tolerante."""
+    return _INDEX_PARSE_DIAGNOSTIC
 
 
 def _parse_page_token(token: str) -> tuple[int, str, bool]:
@@ -363,6 +415,9 @@ def _strip_subsections(block: str) -> str:
 
 
 def _entry_from_match(number: str, title: str, page_token: str) -> IndexEntry | None:
+    normalized_number = _normalize_section_number(number)
+    if not normalized_number:
+        return None
     title = re.sub(r"\s+", " ", title).strip().rstrip(".")
     if len(title) < 3:
         return None
@@ -373,7 +428,7 @@ def _entry_from_match(number: str, title: str, page_token: str) -> IndexEntry | 
         page = 1
     role = classify_heading(title)
     return IndexEntry(
-        number=number.strip(),
+        number=normalized_number,
         title=title,
         page=page,
         role=role,
@@ -382,34 +437,182 @@ def _entry_from_match(number: str, title: str, page_token: str) -> IndexEntry | 
     )
 
 
-def parse_index_entries(full_text: str) -> list[IndexEntry]:
-    """Apartados del índice: número, título y página (arábiga o romana)."""
-    block = _index_block(full_text)
-    if not block:
-        return []
+def _page_token_from_match(match: re.Match[str]) -> str:
+    for idx in range(3, (match.lastindex or 0) + 1):
+        token = (match.group(idx) or "").strip()
+        if token:
+            return token
+    if (match.lastindex or 0) >= 2:
+        token = (match.group(2) or "").strip()
+        if token.isdigit() or (len(token) <= 8 and _ROMAN.match(token)):
+            return token
+    return ""
+
+
+def _index_fallback_patterns(*, tolerant: bool) -> tuple[re.Pattern[str], ...]:
+    _dots = r"[.\u2026…]{2,}"
+    _page = r"([IVXLCDM]+|\d{1,4})"
+    _page_suffix = rf"(?:\s*(?:{_dots}\s*)?{_page})?"
+    _loose_page_suffix = rf"(?:\s*(?:{_dots}\s*)?{_page}|\s+{_page})?"
+    _flags = re.IGNORECASE
+    patterns: list[re.Pattern[str]] = [
+        re.compile(rf"^(\d{{1,2}})\s+(.+?)\s*(?:{_dots}\s*)?{_page}\s*$", _flags),
+        re.compile(rf"^(\d{{1,2}})(?:\.-|-|[\):]|\s*:\s*)\s*(.+?){_page_suffix}\s*$", _flags),
+        re.compile(rf"^(\d{{1,2}})\.(?!\d)\s*(.+?){_page_suffix}\s*$", _flags),
+        re.compile(rf"^cap[ií]tulo\s+(\d{{1,2}})\.?\s*(.+?){_page_suffix}\s*$", _flags),
+        re.compile(rf"^cap[ií]tulo\s+(\d{{1,2}})\s+(.+?){_page_suffix}\s*$", _flags),
+        re.compile(rf"^cap[ií]tulo\s+([IVXLCDM]+)\.?\s*(.+?){_page_suffix}\s*$", _flags),
+        re.compile(
+            rf"^cap[ií]tulo\s+({_ORDINAL_WORD_PATTERN})\.?\s*(.+?){_page_suffix}\s*$",
+            _flags,
+        ),
+        re.compile(rf"^([IVXLCDM]{{2,8}})\s+([A-ZÁÉÍÓÚÑÜ].+?){_page_suffix}\s*$", _flags),
+        re.compile(rf"^I\s+([A-ZÁÉÍÓÚÑÜ][^\d].+?){_page_suffix}\s*$", _flags),
+        re.compile(rf"^([A-Z])\s+([A-ZÁÉÍÓÚÑÜ][A-ZÁÉÍÓÚÑÜ\s]{{3,}}.+?){_page_suffix}\s*$", _flags),
+        re.compile(
+            rf"^(\d{{1,2}})(?:\.(?![0-9])|\s+)\s*(.+?)\s*\((?:pag\.?|pág\.?|p\.)\s*(\d+)\s*\)",
+            _flags,
+        ),
+    ]
+    if tolerant:
+        patterns.extend(
+            [
+                re.compile(rf"^(\d{{1,2}})\s+(.+?){_loose_page_suffix}\s*$", _flags),
+                re.compile(rf"^(\d{{1,2}})\.(?!\d)\s*(.+?){_loose_page_suffix}\s*$", _flags),
+                re.compile(rf"^cap[ií]tulo\s+(\d{{1,2}})\.?\s*(.+?){_loose_page_suffix}\s*$", _flags),
+                re.compile(rf"^([IVXLCDM]{{2,8}})\s+([A-ZÁÉÍÓÚÑÜ].+?){_loose_page_suffix}\s*$", _flags),
+                re.compile(rf"^I\s+([A-ZÁÉÍÓÚÑÜ][^\d].+?){_loose_page_suffix}\s*$", _flags),
+            ]
+        )
+    return tuple(patterns)
+
+
+_INDEX_SKIP_LINE = re.compile(
+    r"(?i)^(?:tabla|figura|gráfico|anexo\s+[ivxlcdm\d]+)\s+\d|"
+    r"^índice\s+de\s+(?:tablas|figuras|gráficos)",
+)
+
+
+def _prepare_tolerant_block(block: str) -> str:
+    """Normaliza espacios, tabulaciones y títulos partidos para el modo tolerante."""
+    page_token = r"(?:[IVXLCDM]+|\d{1,4})"
+    block = block.replace("\t", " ")
+    lines = [re.sub(r" {2,}", " ", line.strip()) for line in block.splitlines()]
+    merged: list[str] = []
+    idx = 0
+    while idx < len(lines):
+        line = lines[idx]
+        if not line:
+            idx += 1
+            continue
+
+        if re.fullmatch(r"(?i)cap[ií]tulo", line) and idx + 1 < len(lines):
+            merged.append(f"CAPÍTULO {lines[idx + 1]}")
+            idx += 2
+            continue
+
+        only_number = re.fullmatch(r"(\d{1,2})[-.]?", line)
+        if only_number and idx + 1 < len(lines):
+            title_line = lines[idx + 1]
+            if not re.match(r"^\d{1,2}[-.]", title_line):
+                combined = f"{only_number.group(1)}. {title_line}"
+                if idx + 2 < len(lines):
+                    page_candidate = lines[idx + 2].strip()
+                    if re.fullmatch(page_token, page_candidate, re.I):
+                        combined = f"{combined} {page_candidate}"
+                        idx += 1
+                merged.append(combined)
+                idx += 2
+                continue
+
+        if (
+            idx + 1 < len(lines)
+            and not re.search(r"(?:[.\u2026…]{2,}|\s)\d{1,4}\s*$", line)
+            and re.fullmatch(page_token, lines[idx + 1].strip(), re.I)
+            and len(line) > 8
+        ):
+            merged.append(f"{line} {lines[idx + 1].strip()}")
+            idx += 2
+            continue
+
+        merged.append(line)
+        idx += 1
+
+    return _normalize_index_lines("\n".join(merged))
+
+
+def _finalize_index_entries(entries: list[IndexEntry]) -> list[IndexEntry]:
+    entries.sort(key=lambda item: (int(item.number) if item.number.isdigit() else 99, item.page))
+
+    if entries and entries[0].number != "1" and entries[0].number.isdigit():
+        if int(entries[0].number) >= 2:
+            entries.insert(
+                0,
+                IndexEntry(
+                    number="1",
+                    title="INTRODUCCIÓN",
+                    page=1,
+                    role="introduccion",
+                    page_label="I",
+                    page_is_roman=True,
+                ),
+            )
+
+    return _dedupe_by_number(entries)
+
+
+def _entries_coherence_score(entries: list[IndexEntry]) -> int:
+    top = top_level_index_entries(entries)
+    if not top:
+        return 0
+
+    score = len(top) * 12
+    numbers = [int(entry.number) for entry in top if entry.number.isdigit()]
+    score += _sequence_coherence_score(numbers)
+
+    pages = [entry.page for entry in top]
+    if len(pages) > 1:
+        ascending = sum(1 for prev, current in zip(pages, pages[1:]) if current >= prev)
+        score += ascending * 3
+        if pages == sorted(pages):
+            score += 10
+
+    score += len(set(numbers)) * 4
+    score -= sum(1 for entry in top if len(entry.title) < 5) * 6
+    score += sum(1 for entry in top if entry.page_label) * 2
+    return score
+
+
+def _parse_index_entries_from_block(block: str, *, tolerant: bool = False) -> list[IndexEntry]:
+    if tolerant:
+        block = _prepare_tolerant_block(block)
 
     entries: list[IndexEntry] = []
     seen: set[tuple[str, str]] = set()
     matched_line_nos: set[int] = set()
 
-    def add_entry(number: str, title: str, page_token: str, *, line_no: int | None = None) -> bool:
-        number = number.strip()
-        if "." in number:
+    def add_entry(
+        number: str,
+        title: str,
+        page_token: str,
+        *,
+        line_no: int | None = None,
+    ) -> bool:
+        normalized_number = _normalize_section_number(number)
+        if not normalized_number:
             return False
         title = re.sub(r"\s+", " ", title).strip().rstrip(".")
         if len(title) < 3:
             return False
-        key = (number, title[:40].upper())
+        key = (normalized_number, title[:40].upper())
         if key in seen:
             return False
         if page_token:
-            entry = _entry_from_match(number, title, page_token)
+            entry = _entry_from_match(normalized_number, title, page_token)
         else:
-            order = int(number) if number.isdigit() else roman_to_int(number)
-            if order <= 0:
-                return False
+            order = int(normalized_number)
             entry = IndexEntry(
-                number=number,
+                number=normalized_number,
                 title=title,
                 page=order,
                 role=classify_heading(title),
@@ -424,78 +627,17 @@ def parse_index_entries(full_text: str) -> list[IndexEntry]:
             matched_line_nos.add(line_no)
         return True
 
-    def _page_token_from_match(match: re.Match[str]) -> str:
-        for idx in range(3, (match.lastindex or 0) + 1):
-            token = (match.group(idx) or "").strip()
-            if token:
-                return token
-        return ""
-
     for pattern in (INDEX_LINE_PAREN, TOP_LEVEL_LINE):
         for match in pattern.finditer(block):
             line_no = block[: match.start()].count("\n")
-            add_entry(
-                match.group(1),
-                match.group(2),
-                match.group(3),
-                line_no=line_no,
-            )
+            add_entry(match.group(1), match.group(2), match.group(3), line_no=line_no)
 
-    _dots = r"[.\u2026…]{2,}"
-    _page = r"([IVXLCDM]+|\d{1,4})"
-    _page_suffix = rf"(?:\s*(?:{_dots}\s*)?{_page})?"
-    _flags = re.IGNORECASE
-    fallback_patterns: tuple[re.Pattern[str], ...] = (
-        # 1 Introducción .......... 15 | 1 INTRODUCCIÓN 15
-        re.compile(
-            rf"^(\d{{1,2}})\s+(.+?)\s*(?:{_dots}\s*)?{_page}\s*$",
-            _flags,
-        ),
-        # 1.- Introducción | 1) Introducción | 1 : Introducción
-        re.compile(
-            rf"^(\d{{1,2}})(?:\.-|[\):]|\s*:\s*)\s*(.+?){_page_suffix}\s*$",
-            _flags,
-        ),
-        # 1. Introducción (página opcional; TOP_LEVEL exige puntos+página)
-        re.compile(
-            rf"^(\d{{1,2}})\.(?!\d)\s*(.+?){_page_suffix}\s*$",
-            _flags,
-        ),
-        # Capítulo 1 Introducción | CAPÍTULO I INTRODUCCIÓN
-        re.compile(
-            rf"^cap[ií]tulo\s+(\d{{1,2}})\.?\s*(.+?){_page_suffix}\s*$",
-            _flags,
-        ),
-        re.compile(
-            rf"^cap[ií]tulo\s+(\d{{1,2}})\s+(.+?){_page_suffix}\s*$",
-            _flags,
-        ),
-        re.compile(
-            rf"^cap[ií]tulo\s+([IVXLCDM]+)\.?\s*(.+?){_page_suffix}\s*$",
-            _flags,
-        ),
-        # I Introducción | II Marco Teórico
-        re.compile(
-            rf"^([IVXLCDM]{{1,8}})\s+(.+?){_page_suffix}\s*$",
-            _flags,
-        ),
-        # (p. 15) / (Pág. 15) variantes no cubiertas por INDEX_LINE_PAREN
-        re.compile(
-            rf"^(\d{{1,2}})(?:\.(?![0-9])|\s+)\s*(.+?)\s*\((?:pag\.?|pág\.?|p\.)\s*(\d+)\s*\)",
-            _flags,
-        ),
-    )
-
-    skip_line = re.compile(
-        r"(?i)^(?:tabla|figura|gráfico|anexo\s+[ivxlcdm\d]+)\s+\d|"
-        r"^índice\s+de\s+(?:tablas|figuras|gráficos)",
-    )
-
+    fallback_patterns = _index_fallback_patterns(tolerant=tolerant)
     for line_no, line in enumerate(block.splitlines()):
         if line_no in matched_line_nos:
             continue
         stripped = line.strip()
-        if len(stripped) < 5 or skip_line.search(stripped):
+        if len(stripped) < 5 or _INDEX_SKIP_LINE.search(stripped):
             continue
         if re.match(r"^\d{1,2}\.\d", stripped):
             continue
@@ -504,48 +646,78 @@ def parse_index_entries(full_text: str) -> list[IndexEntry]:
             match = pattern.search(stripped)
             if not match:
                 continue
-            raw_number = match.group(1).strip()
-            title = match.group(2)
-            page_token = _page_token_from_match(match)
-            if _ROMAN.match(raw_number) and not raw_number.isdigit():
-                number = str(roman_to_int(raw_number))
-                if int(number) <= 0:
-                    break
+            first_group = match.group(1).strip()
+            if _normalize_section_number(first_group) and (match.lastindex or 0) >= 2:
+                raw_number = first_group
+                title = match.group(2)
             else:
-                number = raw_number
-            if add_entry(number, title, page_token, line_no=line_no):
+                raw_number = "I"
+                title = match.group(1)
+            page_token = _page_token_from_match(match)
+            if add_entry(raw_number, title, page_token, line_no=line_no):
                 break
 
-    entries.sort(key=lambda item: (int(item.number) if item.number.isdigit() else 99, item.page))
+    return _finalize_index_entries(entries)
 
-    # PDF partido: «1.» seguido de «2. ESTADO DEL ARTE» sin línea de introducción.
-    if entries and entries[0].number != "1" and entries[0].number.isdigit():
-        first_page = 1
-        if int(entries[0].number) >= 2:
-            entries.insert(
-                0,
-                IndexEntry(
-                    number="1",
-                    title="INTRODUCCIÓN",
-                    page=first_page,
-                    role="introduccion",
-                    page_label="I",
-                    page_is_roman=True,
-                ),
-            )
 
-    return _dedupe_by_number(entries)
+def parse_index_entries(full_text: str) -> list[IndexEntry]:
+    """Apartados del índice: número, título y página (arábiga o romana)."""
+    global _INDEX_PARSE_DIAGNOSTIC
+
+    block = _index_block(full_text)
+    if not block:
+        _INDEX_PARSE_DIAGNOSTIC = None
+        return []
+
+    strict_entries = _parse_index_entries_from_block(block, tolerant=False)
+    strict_top = len(top_level_index_entries(strict_entries))
+
+    if strict_top >= _MIN_TOP_LEVEL_SECTIONS:
+        _INDEX_PARSE_DIAGNOSTIC = {
+            "mode": "strict",
+            "strict_top_level": strict_top,
+            "tolerant_top_level": None,
+            "strict_coherence": _entries_coherence_score(strict_entries),
+            "tolerant_coherence": None,
+        }
+        return strict_entries
+
+    tolerant_entries = _parse_index_entries_from_block(block, tolerant=True)
+    strict_score = _entries_coherence_score(strict_entries)
+    tolerant_score = _entries_coherence_score(tolerant_entries)
+    selected = tolerant_entries if tolerant_score > strict_score else strict_entries
+
+    _INDEX_PARSE_DIAGNOSTIC = {
+        "mode": "tolerant" if tolerant_score > strict_score else "strict",
+        "strict_top_level": strict_top,
+        "tolerant_top_level": len(top_level_index_entries(tolerant_entries)),
+        "strict_coherence": strict_score,
+        "tolerant_coherence": tolerant_score,
+    }
+    return selected
+
+
+def _entry_index_priority(entry: IndexEntry) -> tuple[int, int, int, int]:
+    synthetic_page = entry.page == int(entry.number) if entry.number.isdigit() else False
+    return (
+        1 if entry.page_label else 0,
+        0 if synthetic_page and not entry.page_label else 1,
+        sum(1 for char in entry.title if char.isupper()),
+        len(entry.title),
+    )
 
 
 def _dedupe_by_number(entries: list[IndexEntry]) -> list[IndexEntry]:
-    merged: list[IndexEntry] = []
-    seen_numbers: set[str] = set()
+    best_by_number: dict[str, IndexEntry] = {}
     for entry in entries:
-        if entry.number in seen_numbers:
-            continue
-        seen_numbers.add(entry.number)
-        merged.append(entry)
-    return merged
+        current = best_by_number.get(entry.number)
+        if current is None or _entry_index_priority(entry) > _entry_index_priority(current):
+            best_by_number[entry.number] = entry
+    ordered_numbers = sorted(
+        best_by_number,
+        key=lambda value: int(value) if value.isdigit() else 99,
+    )
+    return [best_by_number[number] for number in ordered_numbers]
 
 
 def top_level_index_entries(entries: list[IndexEntry]) -> list[IndexEntry]:

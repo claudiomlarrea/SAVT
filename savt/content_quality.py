@@ -75,12 +75,9 @@ CHECKLIST_ALIGNED_ROLES: dict[str, str] = {
 
 
 def _count_citations(text: str) -> int:
-    from savt.parser import count_numeric_citation_appearances
+    from savt.citations import count_numeric_citation_appearances
 
-    cites = count_numeric_citation_appearances(text)
-    cites += len(re.findall(r"\([A-ZÁÉÍÓÚÑ][^)]*,\s*\d{4}", text))
-    cites += len(re.findall(r"\[[A-ZÁÉÍÓÚÑa-záéíóú][^\]]*,\s*\d{4}", text))
-    return cites
+    return count_numeric_citation_appearances(text)
 
 
 def _section_metrics(text: str) -> dict:

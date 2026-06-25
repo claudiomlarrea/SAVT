@@ -200,7 +200,8 @@ def remove_index_duplicate(body: str) -> str:
 def _looks_like_bibliography_entry(raw: str) -> bool:
     if len(raw) < 30:
         return False
-    body = re.sub(r"^\d+\.\s*", "", raw)
+    body = re.sub(r"^(?:\[\d+\]|\d+\.)\s*", "", raw)
+    body = re.sub(r"^\d+\)\s*", "", body)
     if re.match(r"(?i)(?:disponible|available)\b", body):
         return False
     if not re.match(r'[A-ZÁÉÍÓÚa-z"(]', body):
@@ -209,30 +210,123 @@ def _looks_like_bibliography_entry(raw: str) -> bool:
         return False
     if re.search(r"\b(19|20)\d{2}\b", raw):
         return True
-    if re.search(r"doi|PMID|https?://|Journal|Rev\.|vol\.", raw, re.I):
+    if re.search(r"doi|PMID|ISBN|https?://|Journal|Rev\.|vol\.", raw, re.I):
         return True
     if re.search(r"[A-ZÁÉÍÓÚa-z][A-Za-zÁÉÍÓÚáéíóúñ'\-]+,\s+[A-Z]", raw):
         return True
     return len(body) > 80
 
 
+_NUMBERED_REFERENCE_START_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(r"(?m)^(\d{1,3})\.\s+(?=[A-Za-zÁÉÍÓÚáéíóúñ\"'(])"),
+    re.compile(r"(?m)^\[(\d{1,3})\]\s+(?=[A-Za-zÁÉÍÓÚáéíóúñ\"'(])"),
+    re.compile(r"(?m)^(\d{1,3})\)\s+(?=[A-Za-zÁÉÍÓÚáéíóúñ\"'(])"),
+)
+_NUMBERED_REFERENCE_NUMBER_ONLY = re.compile(r"(?m)^(\d{1,3})\.\s*$")
+
+
+def _prepare_multiline_bibliography_text(bib_text: str) -> str:
+    """Une números de referencia aislados con el bloque multilínea siguiente."""
+    lines = bib_text.splitlines()
+    merged: list[str] = []
+    idx = 0
+    while idx < len(lines):
+        line = lines[idx]
+        stripped = line.strip()
+        number_only = _NUMBERED_REFERENCE_NUMBER_ONLY.match(stripped)
+        if number_only and idx + 1 < len(lines):
+            next_line = lines[idx + 1].strip()
+            if next_line and not _NUMBERED_REFERENCE_NUMBER_ONLY.match(next_line):
+                merged.append(f"{number_only.group(1)}. {next_line}")
+                idx += 2
+                continue
+        merged.append(line)
+        idx += 1
+    return "\n".join(merged)
+
+
+def _collect_numbered_reference_starts(text: str) -> list[tuple[int, int]]:
+    """Devuelve (número, offset) ordenados; una referencia puede ocupar varias líneas."""
+    candidates: list[tuple[int, int]] = []
+    for pattern in _NUMBERED_REFERENCE_START_PATTERNS:
+        for match in pattern.finditer(text):
+            number = int(match.group(1))
+            if 1 <= number <= 999:
+                candidates.append((match.start(), number))
+
+    if not candidates:
+        return []
+
+    candidates.sort(key=lambda item: item[0])
+    starts: list[tuple[int, int]] = []
+    last_pos = -1
+    for pos, number in candidates:
+        if pos == last_pos:
+            continue
+        if starts and pos < starts[-1][0] + 8:
+            continue
+        starts.append((number, pos))
+        last_pos = pos
+    return starts
+
+
+def _reference_chunk_to_raw(text: str, start: int, end: int) -> str:
+    chunk = text[start:end].strip()
+    chunk = re.sub(r"\s*\n\s*", " ", chunk)
+    return _normalize(re.sub(r" {2,}", " ", chunk))
+
+
 def _build_reference_entry(number: int, raw: str) -> ReferenceEntry:
-    doi_match = re.search(r"doi[:.]?\s*(10\.\S+)", raw, re.IGNORECASE)
-    pmid_match = re.search(r"PMID:\s*(\d+)", raw, re.IGNORECASE)
+    doi_match = re.search(r"https?://doi\.org/([^\s]+)", raw, re.IGNORECASE)
+    if not doi_match:
+        doi_match = re.search(r"doi[:.]?\s*(10\.\S+)", raw, re.IGNORECASE)
+    pmid_match = re.search(r"PMID:?\s*(\d+)", raw, re.IGNORECASE)
     year_match = re.search(r"\b(19|20)\d{2}\b", raw)
     year = year_match.group(0) if year_match else ""
     if year and not (1900 <= int(year) <= 2030):
         paren_year = re.search(r"\((\d{4}[a-z]?)\)", raw)
         year = paren_year.group(1)[:4] if paren_year else ""
+    doi_value = doi_match.group(1).rstrip(".,;") if doi_match else ""
+    doi_value = re.sub(r"^https?://doi\.org/", "", doi_value, flags=re.I)
     title = raw.split(". ", 1)[1][:180] if ". " in raw else raw[:180]
     return ReferenceEntry(
         number=number,
         raw=raw,
         title=title,
-        doi=doi_match.group(1).rstrip(".,;") if doi_match else "",
+        doi=doi_value,
         pmid=pmid_match.group(1) if pmid_match else "",
         year=year,
     )
+
+
+def _parse_numbered_bibliography_blocks(bib_text: str) -> dict[int, ReferenceEntry]:
+    """Parser multilínea: cada referencia termina al iniciar la siguiente."""
+    if not bib_text:
+        return {}
+
+    cleaned = re.sub(
+        r"^(?:\s*BIBLIOGRAF[IÍ]A|REFERENCIAS)\s*\n?",
+        "",
+        bib_text,
+        flags=re.IGNORECASE,
+    )
+    cleaned = _prepare_multiline_bibliography_text(cleaned)
+    starts = _collect_numbered_reference_starts(cleaned)
+    entries: dict[int, ReferenceEntry] = {}
+
+    for index, (number, start) in enumerate(starts):
+        end = starts[index + 1][1] if index + 1 < len(starts) else len(cleaned)
+        raw = _reference_chunk_to_raw(cleaned, start, end)
+        if not _looks_like_bibliography_entry(raw):
+            continue
+        if number not in entries or len(raw) > len(entries[number].raw):
+            entries[number] = _build_reference_entry(number, raw)
+
+    return entries
+
+
+def parse_numbered_bibliography(bib_text: str) -> dict[int, ReferenceEntry]:
+    return trim_numbered_bibliography_range(_parse_numbered_bibliography_blocks(bib_text))
 
 
 def trim_numbered_bibliography_range(entries: dict[int, ReferenceEntry]) -> dict[int, ReferenceEntry]:
@@ -255,92 +349,9 @@ def trim_numbered_bibliography_range(entries: dict[int, ReferenceEntry]) -> dict
     return {num: entries[num] for num in nums if 1 <= num <= n_cap}
 
 
-def parse_numbered_bibliography(bib_text: str) -> dict[int, ReferenceEntry]:
-    if not bib_text:
-        return {}
-
-    cleaned = re.sub(
-        r"^(?:\s*BIBLIOGRAF[IÍ]A|REFERENCIAS)\s*\n?",
-        "",
-        bib_text,
-        flags=re.IGNORECASE,
-    )
-    matches = list(NUMBERED_BIB_ENTRY_START.finditer(cleaned))
-    entries: dict[int, ReferenceEntry] = {}
-
-    for index, match in enumerate(matches):
-        number = int(match.group(1))
-        if number < 1 or number > 999:
-            continue
-        end = matches[index + 1].start() if index + 1 < len(matches) else len(cleaned)
-        raw = _normalize(cleaned[match.start() : end])
-        if not _looks_like_bibliography_entry(raw):
-            continue
-        if number not in entries or len(raw) > len(entries[number].raw):
-            entries[number] = _build_reference_entry(number, raw)
-
-    if entries:
-        return trim_numbered_bibliography_range(entries)
-    return parse_bibliography_line_by_line(bib_text)
-
-
 def parse_bibliography_line_by_line(bib_text: str) -> dict[int, ReferenceEntry]:
-    entries: dict[int, ReferenceEntry] = {}
-    if not bib_text:
-        return entries
-
-    current_num: int | None = None
-    buffer: list[str] = []
-
-    def flush() -> None:
-        nonlocal current_num, buffer
-        if current_num is None:
-            return
-        raw = _normalize(" ".join(buffer))
-        doi_match = re.search(r"doi[:.]?\s*(10\.\S+)", raw, re.IGNORECASE)
-        pmid_match = re.search(r"PMID:\s*(\d+)", raw, re.IGNORECASE)
-        year_match = re.search(r"\b(19|20)\d{2}\b", raw)
-        year = year_match.group(0) if year_match else ""
-        if year and not (1900 <= int(year) <= 2030):
-            paren_year = re.search(r"\((\d{4}[a-z]?)\)", raw)
-            year = paren_year.group(1)[:4] if paren_year else ""
-        if not _looks_like_bibliography_entry(raw):
-            current_num = None
-            buffer = []
-            return
-        title = raw
-        if ". " in raw:
-            title = raw.split(". ", 1)[1][:180]
-        entries[current_num] = ReferenceEntry(
-            number=current_num,
-            raw=raw,
-            title=title,
-            doi=doi_match.group(1).rstrip(".,;") if doi_match else "",
-            pmid=pmid_match.group(1) if pmid_match else "",
-            year=year,
-        )
-        current_num = None
-        buffer = []
-
-    for line in bib_text.splitlines():
-        line = line.strip()
-        if not line or BIB_HEADING.match(line):
-            continue
-        m = re.match(r"^(\d+)\.\s*(.*)", line)
-        if m:
-            number = int(m.group(1))
-            if number < 1 or number > 999:
-                continue
-            rest = m.group(2).strip()
-            if not rest and not re.match(r"^\d+\.\s*$", line):
-                continue
-            flush()
-            current_num = number
-            buffer = [rest] if rest else []
-        elif current_num is not None:
-            buffer.append(line)
-    flush()
-    return trim_numbered_bibliography_range(entries)
+    """Compatibilidad: delega en el parser multilínea por bloques."""
+    return parse_numbered_bibliography(bib_text)
 
 
 def parse_bibliography(bib_text: str) -> dict[int, ReferenceEntry]:
@@ -371,29 +382,15 @@ def _is_false_positive_numeric_citation(chunk: str, body: str, start: int) -> bo
 
 
 def count_numeric_citation_appearances(body: str, max_ref: int = 500) -> int:
-    appearances = 0
-    for match in NUMERIC_CITATION_PATTERN.finditer(body):
-        chunk = match.group(1)
-        if _is_false_positive_numeric_citation(chunk, body, match.start()):
-            continue
-        appearances += 1
-    return appearances
+    from savt.citations import count_numeric_citation_appearances as _count
+
+    return _count(body, max_ref=max_ref)
 
 
 def extract_cited_numbers(body: str, max_ref: int = 500) -> set[int]:
-    cited: set[int] = set()
-    for match in NUMERIC_CITATION_PATTERN.finditer(body):
-        chunk = match.group(1)
-        if _is_false_positive_numeric_citation(chunk, body, match.start()):
-            continue
-        for part in re.split(r"[,\s\-–]+", chunk):
-            if part.isdigit():
-                num = int(part)
-                if 1900 <= num <= 2039:
-                    continue
-                if 1 <= num <= max_ref:
-                    cited.add(num)
-    return cited
+    from savt.citations import extract_cited_numbers as _extract
+
+    return _extract(body, max_ref=max_ref)
 
 
 def _numbered_bibliography_max(bibliography: dict[int, ReferenceEntry]) -> int:
