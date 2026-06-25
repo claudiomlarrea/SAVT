@@ -605,7 +605,6 @@ def render_document_data(dashboard: dict, report) -> None:
 
     content = dashboard.get("content_dashboard") or {}
     formal = dashboard.get("formal_dashboard") or {}
-    bib = dashboard.get("bibliography_dashboard") or {}
     st.markdown("## Datos del documento")
     st.caption(f"Perfil: {dashboard.get('profile_label', '—')}")
 
@@ -614,20 +613,15 @@ def render_document_data(dashboard: dict, report) -> None:
         dashboard.get("structure_source") or report.metadata.get("structure_source"),
     )
 
-    refs_used = bib.get("citations_found", 0)
     pages = report.metadata.get("pdf_page_count") or report.page_estimate
     citation_style = citation_style_label(report.metadata.get("citation_style"))
 
-    row1 = st.columns(2)
-    with row1[0]:
+    row = st.columns(3)
+    with row[0]:
         st.metric("Palabras (cuerpo)", f"{report.word_count:,}")
-    with row1[1]:
-        st.metric("Referencias en bibliografía", refs_used)
-
-    row2 = st.columns(2)
-    with row2[0]:
+    with row[1]:
         st.metric("Páginas", pages)
-    with row2[1]:
+    with row[2]:
         st.metric("Estilo de citación", citation_style)
 
     if content.get("bibliography_words"):
