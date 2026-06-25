@@ -116,6 +116,13 @@ def run_document_pipeline(
         section_meta = index_layout["section_meta"]
         index_sections = index_layout["index_sections"]
         structure_source = "index"
+        if not bib_text.strip():
+            from savt.parser import split_body_and_bibliography
+
+            split_body, split_bib = split_body_and_bibliography(full_text)
+            if split_bib.strip():
+                body = split_body
+                bib_text = split_bib
         step2_status = "ok"
         step2_summary = (
             f"{len(index_sections)} apartados con palabras y porcentaje "

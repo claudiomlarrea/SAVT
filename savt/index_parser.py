@@ -187,6 +187,23 @@ def get_index_block_diagnostic() -> dict | None:
     return _INDEX_BLOCK_DIAGNOSTIC
 
 
+_INDEX_TABLE_START = re.compile(
+    r"(?im)^\s*(?:ÍNDICE|INDICE|TABLA\s+DE\s+CONTENIDO)\s*$",
+)
+_ENGLISH_ABSTRACT_MARKERS = re.compile(
+    r"(?i)\b(?:shapiro|wilcoxon|odds ratios?|p\s*<\s*0\.|habitual donors|thesis highlights|"
+    r"findings underscore|both regular and occasional)\b",
+)
+
+
+def _trim_block_to_index_heading(block: str) -> str:
+    """Recorta preámbulo (p. ej. resumen en inglés) hasta el encabezado ÍNDICE."""
+    match = _INDEX_TABLE_START.search(block)
+    if match:
+        return block[match.start() :]
+    return block
+
+
 def _sequence_coherence_score(numbers: list[int]) -> int:
     """Premia 1,2,3… o subsecuencias crecientes sin saltos grandes."""
     if not numbers:
@@ -268,6 +285,14 @@ def _score_index_chunk(raw_chunk: str, normalized: str, *, anchor: str = "") -> 
         breakdown["tables_index_penalty"] = -35
     if re.search(r"(?i)índice\s+de\s+(?:figuras|tablas|gráficas)", anchor_lower):
         breakdown["secondary_anchor_penalty"] = -50
+
+    if _INDEX_TABLE_START.search(normalized[:2500]):
+        breakdown["index_heading_bonus"] = 28
+    elif anchor_lower.startswith("numbered@") and not _INDEX_TABLE_START.search(normalized[:4000]):
+        breakdown["numbered_without_index_heading"] = -45
+
+    if _ENGLISH_ABSTRACT_MARKERS.search(head_sample):
+        breakdown["english_abstract_penalty"] = -55
 
     figura_lines = len(re.findall(r"(?m)^Figura\s+\d", normalized, re.IGNORECASE))
     if figura_lines:
@@ -363,7 +388,9 @@ def _index_block(full_text: str, *, diagnose: bool = False) -> str:
         for variant_name, normalized in variants.items():
             if not normalized.strip():
                 continue
-            total, breakdown = _score_index_chunk(item["raw"], normalized, anchor=item["anchor"])
+            trimmed_raw = _trim_block_to_index_heading(item["raw"])
+            normalized = _trim_block_to_index_heading(normalized)
+            total, breakdown = _score_index_chunk(trimmed_raw, normalized, anchor=item["anchor"])
             record = {
                 **item,
                 "variant": variant_name,
@@ -391,12 +418,13 @@ def _index_block(full_text: str, *, diagnose: bool = False) -> str:
     if not winner:
         return ""
 
-    winner_raw = winner["raw"]
+    winner_raw = _trim_block_to_index_heading(winner["raw"])
     if winner["variant"] == "fallback_lines":
         prepared = _extract_index_lines_fallback(winner_raw)
     else:
         prepared = _normalize_index_lines(winner_raw)
 
+    prepared = _trim_block_to_index_heading(prepared)
     return _strip_subsections(_fix_orphan_index_titles(prepared))
 
 

@@ -36,6 +36,10 @@ BIB_HEADING_LINE = re.compile(
     re.IGNORECASE,
 )
 REFERENCIAS_HEADING = re.compile(r"(?m)^\s*REFERENCIAS\s*$", re.IGNORECASE)
+REFERENCIAS_BIBLIOGRAFICAS_HEADING = re.compile(
+    r"(?m)^\s*REFERENCIAS\s+BIBLIOGRAF[IÍÁ][A-Z]*\s*$",
+    re.IGNORECASE,
+)
 BIB_SUBSECTION = re.compile(
     r"(?i)LEGISLATIVA|JURISPRUDENC|NORMATIVA|CONSULTADA|BIBLIOGRAF[IÍ]AS\s+WEB|FUENTES\s+CONSULTADAS"
 )
@@ -46,10 +50,18 @@ NUMBERED_BIB_ENTRY_HINT = re.compile(r"(?m)^\d+\.\s+[A-Za-zÁÉÍÓÚáéíóú�
 
 
 def _bibliography_heading_line(full_text: str, pos: int) -> str:
+    while pos < len(full_text) and full_text[pos] in "\n\r\t ":
+        pos += 1
     end = full_text.find("\n", pos)
     if end == -1:
         end = min(pos + 160, len(full_text))
     return full_text[pos:end]
+
+
+def _normalize_bibliography_pos(full_text: str, pos: int) -> int:
+    while pos < len(full_text) and full_text[pos] in "\n\r\t ":
+        pos += 1
+    return pos
 
 
 def _is_index_bibliography_line(line: str, pos: int, doc_len: int) -> bool:
@@ -59,8 +71,9 @@ def _is_index_bibliography_line(line: str, pos: int, doc_len: int) -> bool:
 
 
 def _score_bibliography_candidate(full_text: str, pos: int) -> int:
+    pos = _normalize_bibliography_pos(full_text, pos)
     line = _bibliography_heading_line(full_text, pos)
-    if not re.search(r"(?i)BIBLIOGRAF|REFERENCIAS", line[:60]):
+    if not re.search(r"(?i)BIBLIOGRAF|REFERENCIAS", line[:80]):
         return -100
     if BIB_SUBSECTION.search(line):
         return -100
@@ -70,6 +83,8 @@ def _score_bibliography_candidate(full_text: str, pos: int) -> int:
     score = 0
     if re.match(r"(?i)^\s*\d+\.?\s*BIBLIOGRAF", line):
         score += 70
+    elif re.match(r"(?i)^\s*REFERENCIAS\s+BIBLIOGRAF", line):
+        score += 65
     elif re.match(r"(?i)^\s*BIBLIOGRAF", line):
         score += 55
     elif re.match(r"(?i)^\s*REFERENCIAS\s*$", line):
@@ -92,22 +107,31 @@ def _bibliography_start_positions(full_text: str) -> list[int]:
     candidates: set[int] = set()
     inline_patterns = [
         r"(?im)^\s*(?:\d+\.?\s*)?BIBLIOGRAF[IÍÁ][A-Z]*\s*(?:\n|$)",
+        r"(?im)^\s*REFERENCIAS\s+BIBLIOGRAF[IÍÁ][A-Z]*\s*(?:\n|$)",
         r"(?im)^\s*REFERENCIAS\s*$",
         r"(?im)\n\n\s*(?:\d+\.?\s*)?BIBLIOGRAF[IÍÁ][A-Z]*\s*(?:\n\s*)?(?=[A-ZÁÉÍÓÚ\"(])",
         r"(?im)\n\n\s*BIBLIOGRAF[IÍÁ][A-Z]*\s*(?:\n\s*)?(?=[A-ZÁÉÍÓÚ\"(])",
         r"(?im)(?:^|\n\n)\s*BIBLIOGRAF[IÍÁ][A-Z]*\s*\n\s*\d+\.\s+[A-Za-zÁÉÍÓÚ\"(]",
     ]
-    heading_in_match = re.compile(r"(?i)(?:\d+\.?\s*)?BIBLIOGRAF[IÍÁ][A-Z]*|^REFERENCIAS")
+    heading_in_match = re.compile(
+        r"(?i)(?:\d+\.?\s*)?BIBLIOGRAF[IÍÁ][A-Z]*|^REFERENCIAS(?:\s+BIBLIOGRAF[IÍÁ][A-Z]*)?"
+    )
     for pattern in inline_patterns:
         for match in re.finditer(pattern, full_text):
             chunk = match.group(0)
             heading = heading_in_match.search(chunk)
             if heading:
-                candidates.add(match.start() + heading.start())
+                candidates.add(_normalize_bibliography_pos(full_text, match.start() + heading.start()))
 
-    for pattern in (BIB_HEADING_NUMBERED, BIB_HEADING, BIB_HEADING_LINE, REFERENCIAS_HEADING):
+    for pattern in (
+        BIB_HEADING_NUMBERED,
+        BIB_HEADING,
+        BIB_HEADING_LINE,
+        REFERENCIAS_HEADING,
+        REFERENCIAS_BIBLIOGRAFICAS_HEADING,
+    ):
         for match in pattern.finditer(full_text):
-            candidates.add(match.start())
+            candidates.add(_normalize_bibliography_pos(full_text, match.start()))
 
     scored = [(pos, _score_bibliography_candidate(full_text, pos)) for pos in candidates]
     scored = [(pos, score) for pos, score in scored if score > 0]
@@ -165,13 +189,13 @@ def split_body_and_bibliography(full_text: str) -> tuple[str, str]:
         body = full_text[:idx].strip()
         bib = full_text[idx:].strip()
         bib = re.sub(
-            r"^(?:\d+\.?\s*)?(?:[A-ZÁÉÍÓÚÑ]{2,12}\s+)?BIBLIOGRAF[IÍÁ][A-Z]*\s*",
+            r"^(?:\d+\.?\s*)?(?:REFERENCIAS\s+)?BIBLIOGRAF[IÍÁ][A-Z]*\s*|^REFERENCIAS\s+BIBLIOGRAF[IÍÁ][A-Z]*\s*",
             "BIBLIOGRAFÍA\n",
             bib,
             count=1,
             flags=re.IGNORECASE,
         )
-        bib = re.sub(r"^REFERENCIAS\s*", "REFERENCIAS\n", bib, flags=re.IGNORECASE)
+        bib = re.sub(r"^REFERENCIAS\s*$", "REFERENCIAS\n", bib, flags=re.IGNORECASE)
         return body, bib
     return full_text, ""
 
