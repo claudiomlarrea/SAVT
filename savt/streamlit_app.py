@@ -601,8 +601,6 @@ def render_pipeline_steps(pipeline: list[dict], structure_source: str | None = N
 
 
 def render_document_data(dashboard: dict, report) -> None:
-    from savt.ui_labels import citation_style_label
-
     content = dashboard.get("content_dashboard") or {}
     formal = dashboard.get("formal_dashboard") or {}
     st.markdown("## Datos del documento")
@@ -614,15 +612,12 @@ def render_document_data(dashboard: dict, report) -> None:
     )
 
     pages = report.metadata.get("pdf_page_count") or report.page_estimate
-    citation_style = citation_style_label(report.metadata.get("citation_style"))
 
-    row = st.columns(3)
+    row = st.columns(2)
     with row[0]:
         st.metric("Palabras (cuerpo)", f"{report.word_count:,}")
     with row[1]:
         st.metric("Páginas", pages)
-    with row[2]:
-        st.metric("Estilo de citación", citation_style)
 
     if content.get("bibliography_words"):
         st.caption(f"Bibliografía: {content['bibliography_words']:,} palabras.")

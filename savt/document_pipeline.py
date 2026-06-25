@@ -165,7 +165,7 @@ def run_document_pipeline(
         bibliography: dict[int, ReferenceEntry] = {}
         step3 = _step(
             "bibliography",
-            "3. Apartado bibliográfico → APA o Vancouver",
+            "3. Apartado bibliográfico",
             "error",
             "No se localizó el apartado de bibliografía en el documento.",
             style=None,
@@ -175,13 +175,12 @@ def run_document_pipeline(
     else:
         citation_style = detect_citation_style("", bib_for_parse)
         bibliography = parse_bibliography_by_style(bib_for_parse, citation_style)
-        style_label = "APA" if citation_style == "apa" else "Vancouver"
         step3_status = "ok" if len(bibliography) >= 3 else "warning"
         step3 = _step(
             "bibliography",
-            "3. Apartado bibliográfico → APA o Vancouver",
+            "3. Apartado bibliográfico",
             step3_status,
-            f"Estilo {style_label} · {len(bibliography)} referencias · {bib_words:,} palabras",
+            f"{bib_words:,} palabras detectadas",
             style=citation_style,
             references=len(bibliography),
             words=bib_words,
@@ -193,13 +192,7 @@ def run_document_pipeline(
     cited_numbers, cited_keys = _citations_from_bibliography(bibliography, citation_style)
     refs_with_key = sum(1 for ref in bibliography.values() if ref.key or ref.raw)
     step4_status = "ok" if len(bibliography) >= 3 else "warning"
-    if citation_style == "apa":
-        step4_summary = (
-            f"{len(bibliography)} entradas bibliográficas · "
-            f"{len(cited_keys)} con clave autor|año identificable"
-        )
-    else:
-        step4_summary = f"{len(bibliography)} referencias numeradas en bibliografía"
+    step4_summary = "Análisis del apartado bibliográfico completado (sin escanear el cuerpo)"
 
     steps.append(
         _step(
