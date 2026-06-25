@@ -47,10 +47,21 @@ BIB_HEADING_INLINE = re.compile(
 BIB_SUBSECTION = re.compile(
     r"(?i)LEGISLATIVA|JURISPRUDENC|NORMATIVA|CONSULTADA|BIBLIOGRAF[IÍ]AS\s+WEB|FUENTES\s+CONSULTADAS"
 )
+_BIB_BULLET_CHARS = r"[\uf0a7\uf0b7\uf076\uf0d8\u25aa\u25cf\u25cb\u2022▪•➤►]"
 APA_BIB_ENTRY_HINT = re.compile(
-    r"(?m)^[A-ZÁÉÍÓÚÑ\"(][^\n]{4,80},\s*[A-ZÁÉÍÓÚa-záéíóúñ]"
+    rf"(?m)(?:{_BIB_BULLET_CHARS}\s*)?"
+    rf"[A-ZÁÉÍÓÚÑ][^\n]{{8,220}}?(?:\s|,)\s*\(\d{{4}}[a-z]?\)"
 )
-NUMBERED_BIB_ENTRY_HINT = re.compile(r"(?m)^\d+\.\s+[A-Za-zÁÉÍÓÚáéíóúñ\"(]")
+NUMBERED_BIB_ENTRY_HINT = re.compile(
+    r"(?m)^\s*(?:\[?\d{1,3}\]?\.)\s+[A-Za-zÁÉÍÓÚáéíóúñ\"'(]"
+)
+VANCOUVER_BIB_ENTRY_HINT = re.compile(
+    r"(?m)^\s*\d{1,3}\.\s+[A-ZÁÉÍÓÚÑ][^\n]{10,}(?:\[Internet\]|Available from:|\[\d{4}|\(\d{4})"
+)
+_BIB_END_MARKERS = re.compile(
+    r"(?im)(?:^|\n)\s*(?:\d+(?:\.\d+)*\.?\s*)?"
+    r"(?:ANEXOS?|AP[EÉ]NDIC(?:ES)?|GLOSARIO|ÍNDICE|INDICE)\b"
+)
 
 
 def _bibliography_heading_line(full_text: str, pos: int) -> str:
@@ -103,8 +114,100 @@ def _score_bibliography_candidate(full_text: str, pos: int) -> int:
     following = full_text[pos : pos + 8000]
     apa_entries = len(APA_BIB_ENTRY_HINT.findall(following))
     numbered_entries = len(NUMBERED_BIB_ENTRY_HINT.findall(following))
-    score += min(apa_entries + numbered_entries, 35)
+    vancouver_entries = len(VANCOUVER_BIB_ENTRY_HINT.findall(following))
+    score += min(apa_entries + numbered_entries + vancouver_entries, 35)
     return score
+
+
+def _score_inferred_bibliography_region(full_text: str, start: int, end: int) -> int:
+    from savt.text_normalize import normalize_bibliography_text
+
+    region = full_text[start:end]
+    if len(region) < 300:
+        return -100
+    normalized = normalize_bibliography_text(region)
+    apa = len(APA_BIB_ENTRY_HINT.findall(normalized))
+    numbered = len(NUMBERED_BIB_ENTRY_HINT.findall(normalized))
+    vancouver = len(VANCOUVER_BIB_ENTRY_HINT.findall(normalized))
+    years = len(re.findall(r"(?:\(\d{4}[a-z]?\)|;\s*\d{4}\b|\b\d{4}\s+[A-Z][a-z]{2,3}\b)", normalized))
+    entry_count = apa + numbered + vancouver
+    if entry_count < 6 and years < 6:
+        return -100
+    score = min(entry_count * 4 + years, 90)
+    relative = start / max(len(full_text), 1)
+    if relative > 0.65:
+        score += 20
+    elif relative > 0.5:
+        score += 10
+    return score
+
+
+def _locate_bibliography_without_heading(full_text: str) -> int | None:
+    """Detecta bloque bibliográfico sin encabezado (APA con viñetas o Vancouver numerado)."""
+    if not full_text:
+        return None
+    doc_len = len(full_text)
+    from savt.text_normalize import normalize_bibliography_text
+
+    windows: list[tuple[int, int]] = []
+    end_markers = list(_BIB_END_MARKERS.finditer(full_text))
+    for match in end_markers:
+        end = match.start()
+        pre = full_text[max(0, end - 8000) : end]
+        pre_entries = len(NUMBERED_BIB_ENTRY_HINT.findall(pre)) + len(APA_BIB_ENTRY_HINT.findall(pre))
+        if end < doc_len * 0.12 and pre_entries < 4:
+            continue
+        windows.append((max(0, end - 35000), end))
+    if not windows:
+        windows.append((int(doc_len * 0.38), doc_len))
+
+    best_start: int | None = None
+    best_score = -1
+    for win_start, win_end in windows:
+        region = full_text[win_start:win_end]
+        if len(region) < 500:
+            continue
+        normalized = normalize_bibliography_text(region)
+        entry_matches: list[int] = []
+        for pattern in (APA_BIB_ENTRY_HINT, NUMBERED_BIB_ENTRY_HINT, VANCOUVER_BIB_ENTRY_HINT):
+            entry_matches.extend(match.start() for match in pattern.finditer(normalized))
+        entry_matches = sorted(set(entry_matches))
+        if len(entry_matches) < 6:
+            continue
+
+        for idx in range(len(entry_matches) - 5):
+            block_start = entry_matches[idx]
+            block_end = entry_matches[min(idx + 20, len(entry_matches) - 1)]
+            if block_end - block_start > 25000:
+                continue
+            score = _score_inferred_bibliography_region(
+                full_text,
+                win_start + block_start,
+                win_start + min(len(region), block_end + 400),
+            )
+            if score > best_score:
+                best_score = score
+                best_start = win_start + block_start
+
+    if best_start is None or best_score < 20:
+        return None
+
+    lookback = full_text[max(0, best_start - 500) : best_start]
+    if re.search(r"(?i)conclus", lookback[-250:]):
+        after_conc = re.search(
+            rf"(?is)conclus(?:i[oó]n|iones)[^\n]{{0,200}}\n+((?:{_BIB_BULLET_CHARS}\s*)?[A-ZÁÉÍÓÚÑ\d])",
+            lookback,
+        )
+        if after_conc:
+            best_start = best_start - len(lookback) + after_conc.start(1)
+    return max(0, best_start)
+
+
+def _trim_bibliography_end(bib: str) -> str:
+    match = _BIB_END_MARKERS.search(bib)
+    if match:
+        return bib[: match.start()].strip()
+    return bib.strip()
 
 
 def _bibliography_start_positions(full_text: str) -> list[int]:
@@ -138,7 +241,17 @@ def _bibliography_start_positions(full_text: str) -> list[int]:
         for match in pattern.finditer(full_text):
             candidates.add(_normalize_bibliography_pos(full_text, match.start()))
 
+    inferred = _locate_bibliography_without_heading(full_text)
+    if inferred is not None:
+        candidates.add(_normalize_bibliography_pos(full_text, inferred))
+
     scored = [(pos, _score_bibliography_candidate(full_text, pos)) for pos in candidates]
+    for pos in list(candidates):
+        end_match = _BIB_END_MARKERS.search(full_text, pos + 200)
+        end = end_match.start() if end_match else min(len(full_text), pos + 20000)
+        inferred_score = _score_inferred_bibliography_region(full_text, pos, end)
+        if inferred_score > 0:
+            scored.append((pos, inferred_score))
     scored = [(pos, score) for pos, score in scored if score > 0]
     if not scored:
         return []
@@ -213,6 +326,15 @@ def split_body_and_bibliography(full_text: str) -> tuple[str, str]:
                 flags=re.IGNORECASE,
             )
         bib = re.sub(r"^REFERENCIAS\s*$", "REFERENCIAS\n", bib, flags=re.IGNORECASE)
+        bib = _trim_bibliography_end(bib)
+        return body, bib
+
+    inferred = _locate_bibliography_without_heading(full_text)
+    if inferred is not None:
+        body = full_text[:inferred].strip()
+        bib = _trim_bibliography_end(full_text[inferred:].strip())
+        if bib and not re.match(r"(?i)^(?:BIBLIOGRAF|REFERENCIAS)", bib):
+            bib = "BIBLIOGRAFÍA\n" + bib
         return body, bib
     return full_text, ""
 
@@ -241,7 +363,8 @@ def remove_index_duplicate(body: str) -> str:
 def _looks_like_bibliography_entry(raw: str) -> bool:
     if len(raw) < 30:
         return False
-    body = re.sub(r"^(?:\[\d+\]|\d+\.)\s*", "", raw)
+    body = re.sub(rf"^(?:{_BIB_BULLET_CHARS}|\s)+", "", raw)
+    body = re.sub(r"^(?:\[\d+\]|\d+\.)\s*", "", body)
     body = re.sub(r"^\d+\)\s*", "", body)
     if re.match(r"(?i)(?:disponible|available)\b", body):
         return False

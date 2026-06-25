@@ -21,7 +21,7 @@ _APA_SURNAME = (
     rf"(?:(?:{_NAME_PARTICLE}\s+)?[A-ZÁÉÍÓÚÑ][A-Za-zÁÉÍÓÚáéíóúñüöäÜÖÄ\-]+"
     rf"(?:\s+(?:{_NAME_PARTICLE}\s+)?[A-ZÁÉÍÓÚÑ][A-Za-zÁÉÍÓÚáéíóúñüöäÜÖÄ\-]+)*)"
 )
-_APA_YEAR = r"\(\d{4}[a-z]?(?:,\s*[A-Za-z]+)?\)"
+_APA_YEAR = r"(?:\s|,)\s*\(\d{4}[a-z]?(?:,\s*[A-Za-z]+)?\)"
 _APA_AUTHOR_BLOCK = re.compile(
     rf"{_APA_SURNAME},\s+[A-ZÁÉÍÓÚÑ]\.(?:\s*\n\s*)?"
     rf"(?:(?!(?:https?://|doi\.org/))[\s\S]){{0,400}}?{_APA_YEAR}",
@@ -32,11 +32,12 @@ _APA_ORG_BLOCK = re.compile(
 _APA_URL_BEFORE_ENTRY = re.compile(r"(?:doi\.org/\S+|https?://\S+)\s*$")
 
 # Compatibilidad con detectores que usan inicio de línea.
+_BIB_BULLET_PREFIX = r"(?:[\uf0a7\uf0b7\uf076\uf0d8\u25aa\u25cf\u25cb\u2022▪•➤►]\s*)?"
 APA_ENTRY_START = re.compile(
-    r"(?ms)^([A-ZÁÉÍÓÚÑ0-9][^\n]{2,220}?\(\d{4}[a-z]?\))",
+    rf"(?ms)^(?:{_BIB_BULLET_PREFIX})([A-ZÁÉÍÓÚÑ0-9][^\n]{{2,240}}?(?:\s|,)\s*\(\d{{4}}[a-z]?\))",
 )
 APA_ENTRY_FALLBACK = re.compile(
-    r"(?ms)(?:^|\n)([A-ZÁÉÍÓÚÑ][A-Za-zÁÉÍÓÚáéíóúñ0-9.,\-\s&]{2,120}?\(\d{4}[a-z]?\))",
+    rf"(?ms)(?:^|\n)(?:{_BIB_BULLET_PREFIX})([A-ZÁÉÍÓÚÑ][A-Za-zÁÉÍÓÚáéíóúñ0-9.,\-\s&]{{2,160}}?(?:\s|,)\s*\(\d{{4}}[a-z]?\))",
 )
 
 INSTITUTIONAL_CITATIONS = {
@@ -189,7 +190,7 @@ def apa_citation_key(citation: str) -> str:
 
 
 def apa_entry_key(entry: str) -> str:
-    year_match = re.search(r"\((\d{4}[a-z]?)(?:,\s*[A-Za-z]+)?\)", entry)
+    year_match = re.search(r"(?:\s|,)\s*\((\d{4}[a-z]?)(?:,\s*[A-Za-z]+)?\)", entry)
     if not year_match:
         return ""
     year = year_match.group(1)[:4]
@@ -223,8 +224,15 @@ def detect_citation_style(body: str, bib_text: str) -> str:
         apa_hints = len(APA_ENTRY_START.findall(normalized)) + len(APA_ENTRY_FALLBACK.findall(normalized))
     # Solo números bajos al inicio de línea (1.–200.); evita páginas/volúmenes en APA.
     numbered_hints = len(
-        re.findall(r"(?m)^(?:[1-9]\d{0,2})\.\s+[A-Za-zÁÉÍÓÚ\"(]", normalized)
+        re.findall(r"(?m)^\s*(?:\[?[1-9]\d{0,2}\]?\.)\s+[A-Za-zÁÉÍÓÚ\"'(]", normalized)
     )
+    vancouver_hints = len(
+        re.findall(
+            r"(?m)^\s*\d{1,3}\.\s+[A-ZÁÉÍÓÚÑ][^\n]{10,}(?:\[Internet\]|Available from:|\[Cited)",
+            normalized,
+        )
+    )
+    numbered_hints = max(numbered_hints, vancouver_hints)
 
     if apa_hints >= 10 and apa_hints >= numbered_hints:
         return "apa"
@@ -247,10 +255,12 @@ def _is_apa_entry_start(bib_text: str, pos: int) -> bool:
     prefix = bib_text[max(0, pos - 280):pos]
     if prefix.endswith("\n"):
         return True
+    if re.search(rf"(?:^|\n)\s*{_BIB_BULLET_PREFIX}$", prefix):
+        return True
     if _APA_URL_BEFORE_ENTRY.search(prefix.rstrip()):
         return True
     tail = prefix.rstrip()[-120:]
-    if re.search(rf"{_APA_YEAR}\.\s*$", tail):
+    if re.search(rf"{_APA_YEAR}\.?\s*$", tail):
         return True
     return False
 
@@ -292,7 +302,7 @@ def parse_apa_bibliography(bib_text: str) -> dict[int, ReferenceEntry]:
         doi_match = re.search(r"https?://doi\.org/([^\s]+)", raw, re.IGNORECASE)
         if not doi_match:
             doi_match = re.search(r"doi[:.]?\s*(10\.\S+)", raw, re.IGNORECASE)
-        year_match = re.search(r"\((\d{4}[a-z]?)(?:,\s*[A-Za-z]+)?\)", raw)
+        year_match = re.search(r"(?:\s|,)\s*\((\d{4}[a-z]?)(?:,\s*[A-Za-z]+)?\)", raw)
         doi_value = doi_match.group(1).rstrip(".,;") if doi_match else ""
         doi_value = re.sub(r"^https?://doi\.org/", "", doi_value, flags=re.I)
         key = apa_entry_key(raw)

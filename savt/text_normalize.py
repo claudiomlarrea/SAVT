@@ -53,11 +53,18 @@ def normalize_bibliography_text(bib_text: str) -> str:
     if not bib_text:
         return bib_text
     text = collapse_soft_line_breaks(bib_text)
+    # Viñetas PDF (cuadrado, círculo, flecha) suelen pegar entradas en la misma línea.
     text = re.sub(
-        r"([A-ZÁÉÍÓÚÑ][A-Za-zÁÉÍÓÚáéíóúñ.\-&\s]{1,80}\.)\s+\((\d{4}[a-z]?)\)",
+        r"\s*[\uf0a7\uf0b7\uf076\uf0d8\u25aa\u25cf\u25cb\u2022▪•➤►]\s+(?=[A-ZÁÉÍÓÚÑ])",
+        "\n",
+        text,
+    )
+    text = re.sub(
+        r"([A-ZÁÉÍÓÚÑ][A-Za-zÁÉÍÓÚáéíóúñ.\-&\s]{1,80}[A-ZÁÉÍÓÚÑa-záéíóúñ.])(?:\s*\(|\s)\((\d{4}[a-z]?)\)",
         r"\1 (\2)",
         text,
     )
+    text = re.sub(r",\s*\((\d{4})", r" (\1", text)
     # Autor en una línea y (AAAA) en la siguiente — habitual en PDF.
     text = re.sub(r"([A-Z]\.)\s*\n\s*\((\d{4})", r"\1 (\2", text)
     # Apellidos partidos por salto de línea: Roger-\nMartínez → Roger-Martínez
