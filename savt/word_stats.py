@@ -63,6 +63,31 @@ def build_word_statistics(parsed: dict) -> dict:
     body = parsed.get("body", "")
     total_body = parsed.get("word_count") or count_words(body)
     bib_words = parsed.get("bibliography_word_count", 0)
+
+    if parsed.get("structure_source") == "index" and parsed.get("index_sections"):
+        sections: list[dict] = []
+        for item in parsed["index_sections"]:
+            sections.append(
+                {
+                    "title": item.get("title", "—"),
+                    "words": item.get("words", 0),
+                    "percent": item.get("percent", 0),
+                    "percent_label": item.get("percent_label", "—"),
+                    "role": item.get("role", "otros"),
+                    "page": item.get("page"),
+                    "source": "index",
+                }
+            )
+        classified_words = sum(s["words"] for s in sections)
+        _meta = parsed.get("section_meta") or {}
+        return {
+            "total_body_words": total_body,
+            "bibliography_words": bib_words,
+            "sections": sections,
+            "classified_body_words": classified_words,
+            "section_partition_meta": _meta,
+        }
+
     role_texts, _meta = _partition_word_map(parsed)
 
     sections: list[dict] = []

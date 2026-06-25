@@ -584,75 +584,42 @@ def _citations_from_bibliography(
 
 
 def parse_thesis_file(source: BinaryIO | str, filename: str = "tesis.docx") -> dict:
-    from savt.bibliography_styles import (
-        detect_citation_style,
-        infer_topic_keywords_from_document,
-        parse_bibliography_by_style,
-    )
+    from savt.bibliography_styles import infer_topic_keywords_from_document
+    from savt.document_pipeline import run_document_pipeline
     from savt.document_sections import extract_title
-    from savt.index_structure import page_char_offsets, partition_from_index
-    from savt.pdf_parser import prepare_pdf_text, remove_pdf_front_matter
+    from savt.pdf_parser import prepare_pdf_text
     from savt.text_normalize import normalize_full_document_text
 
     pdf_page_count = None
-    page_offsets: list[int] = []
+    norm_pages: list[str] | None = None
     lower_name = filename.lower()
-    index_layout: dict | None = None
 
     if lower_name.endswith(".pdf"):
-        full_text_raw, pdf_page_count, page_texts = prepare_pdf_text(source)
+        _full_raw, pdf_page_count, page_texts = prepare_pdf_text(source)
         norm_pages = [normalize_full_document_text(page) for page in page_texts]
         full_text = "\n".join(norm_pages)
-        page_offsets = page_char_offsets(norm_pages)
-        index_layout = partition_from_index(
-            full_text,
-            page_offsets=page_offsets,
-            page_count=pdf_page_count,
-        )
-        if index_layout:
-            body = index_layout["body"]
-            bib_text = index_layout["bibliography_text"]
-            section_map = index_layout["section_map"]
-            section_meta = index_layout["section_meta"]
-        else:
-            body_raw, bib_text = split_body_and_bibliography(full_text)
-            body = remove_pdf_front_matter(body_raw)
-            from savt.section_resolver import build_enriched_section_map
-
-            section_map, section_meta = build_enriched_section_map(body)
     else:
-        full_text = extract_text_from_docx(source)
-        full_text = normalize_full_document_text(full_text)
-        index_layout = partition_from_index(full_text)
-        if index_layout:
-            body = index_layout["body"]
-            bib_text = index_layout["bibliography_text"]
-            section_map = index_layout["section_map"]
-            section_meta = index_layout["section_meta"]
-        else:
-            body_raw, bib_text = split_body_and_bibliography(full_text)
-            body = remove_index_duplicate(body_raw)
-            from savt.section_resolver import build_enriched_section_map
+        full_text = normalize_full_document_text(extract_text_from_docx(source))
 
-            section_map, section_meta = build_enriched_section_map(body)
-
-    bib_for_parse = re.sub(
-        r"^(?:\d+\.?\s*)?(?:[A-ZÁÉÍÓÚÑ]{2,12}\s+)?BIBLIOGRAF[IÍÁ][A-Z]*\s*",
-        "BIBLIOGRAFÍA\n",
-        bib_text,
-        count=1,
-        flags=re.IGNORECASE,
+    pipeline = run_document_pipeline(
+        full_text,
+        page_texts=norm_pages,
+        page_count=pdf_page_count,
     )
-    citation_style = detect_citation_style("", bib_for_parse)
-    bibliography = parse_bibliography_by_style(bib_for_parse, citation_style)
+
+    body = pipeline["body"]
+    bib_text = pipeline["bibliography_text"]
+    section_map = pipeline["section_map"]
+    section_meta = pipeline["section_meta"]
+    bibliography = pipeline["bibliography"]
+    citation_style = pipeline["citation_style"]
+    cited_numbers = pipeline["cited_numbers"]
+    cited_keys = pipeline["cited_keys"]
+
     sections = split_sections(body)
     conclusions = extract_conclusions(body)
     topic_keywords = infer_topic_keywords_from_document(full_text, body, filename)
     document_title = extract_title(full_text, filename)
-
-    cited_numbers, cited_keys = _citations_from_bibliography(bibliography, citation_style)
-    citation_contexts_numbered: list[tuple[int, str]] = []
-    citation_contexts_keys: list[tuple[str, str]] = []
 
     bib_words = count_words(bib_text)
     body_words = count_words(body)
@@ -674,12 +641,13 @@ def parse_thesis_file(source: BinaryIO | str, filename: str = "tesis.docx") -> d
         "sections": sections,
         "section_map": section_map,
         "section_meta": section_meta,
-        "index_sections": (index_layout or {}).get("index_sections", []),
-        "structure_source": (index_layout or {}).get("structure_source", "headings"),
+        "index_sections": pipeline["index_sections"],
+        "structure_source": pipeline["structure_source"],
+        "pipeline": pipeline["steps"],
         "cited_numbers": cited_numbers,
         "cited_keys": cited_keys,
-        "citation_contexts": citation_contexts_numbered,
-        "citation_contexts_apa": citation_contexts_keys,
+        "citation_contexts": [],
+        "citation_contexts_apa": [],
         "topic_keywords": topic_keywords,
         "document_title": document_title,
         "research_questions": extract_research_questions(body),

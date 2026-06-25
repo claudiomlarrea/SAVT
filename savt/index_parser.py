@@ -7,10 +7,16 @@ from dataclasses import dataclass
 
 from savt.section_resolver import classify_heading
 
-INDEX_HEADING = re.compile(r"(?im)^\s*ÍNDICE\s*$|^\s*INDICE\s*$|^\s*TABLA DE CONTENIDO\s*$")
-INDEX_LINE = re.compile(
-    r"(?m)^\s*(\d{1,2})(?:\.(?![0-9])|\s+)\s*(.+?)\s*\(pag\.\s*(\d+)\s*\)",
+INDEX_HEADING = re.compile(
+    r"(?im)^\s*ÍNDICE\s*$|^\s*INDICE\s*$|^\s*TABLA DE CONTENIDO\s*$|^\s*CONTENIDO\s*$"
+)
+_PAGE_IN_PARENS = r"(?:pag\.?|pág\.?|p\.)\s*(\d+)"
+INDEX_LINE_PAREN = re.compile(
+    rf"(?m)^\s*(\d{{1,2}})(?:\.(?![0-9])|\s+)\s*(.+?)\s*\({_PAGE_IN_PARENS}\s*\)",
     re.IGNORECASE,
+)
+INDEX_LINE_DOTS = re.compile(
+    r"(?m)^\s*(\d{1,2})(?:\.(?![0-9])|\s+)\s*(.+?)\s*\.{2,}\s*(\d+)\s*$",
 )
 BIBLIOGRAPHY_TITLE = re.compile(r"(?i)bibliograf|referencias\s+bibliogr|referencias\s*$")
 
@@ -36,7 +42,7 @@ def _index_block(full_text: str) -> str:
     else:
         # Sin encabezado «ÍNDICE»: buscar agrupación de líneas (pag. N) al inicio.
         head = full_text[: min(len(full_text), 25000)]
-        first_pag = re.search(r"\(pag\.\s*\d+\s*\)", head, re.I)
+        first_pag = re.search(rf"\({_PAGE_IN_PARENS}\s*\)", head, re.I)
         if not first_pag or first_pag.start() > 8000:
             return ""
         chunk = head[max(0, first_pag.start() - 4000) : first_pag.start() + 8000]
@@ -46,7 +52,7 @@ def _index_block(full_text: str) -> str:
     kept: list[str] = []
     empty_run = 0
     for line in lines:
-        if re.search(r"\(pag\.\s*\d+\s*\)", line, re.I):
+        if re.search(rf"\({_PAGE_IN_PARENS}\s*\)", line, re.I):
             kept.append(line)
             empty_run = 0
             continue
@@ -71,15 +77,18 @@ def parse_index_entries(full_text: str) -> list[IndexEntry]:
 
     entries: list[IndexEntry] = []
     seen_pages: set[int] = set()
-    for match in INDEX_LINE.finditer(block):
-        number = match.group(1).strip()
-        title = re.sub(r"\s+", " ", match.group(2)).strip()
-        page = int(match.group(3))
-        if page in seen_pages and len(title) < 12:
-            continue
-        seen_pages.add(page)
-        role = classify_heading(title)
-        entries.append(IndexEntry(number=number, title=title, page=page, role=role))
+    for pattern in (INDEX_LINE_PAREN, INDEX_LINE_DOTS):
+        for match in pattern.finditer(block):
+            number = match.group(1).strip()
+            title = re.sub(r"\s+", " ", match.group(2)).strip().rstrip(".")
+            page = int(match.group(3))
+            if page > 5000 or len(title) < 3:
+                continue
+            if page in seen_pages and len(title) < 12:
+                continue
+            seen_pages.add(page)
+            role = classify_heading(title)
+            entries.append(IndexEntry(number=number, title=title, page=page, role=role))
 
     entries.sort(key=lambda item: item.page)
     return _dedupe_by_page(entries)

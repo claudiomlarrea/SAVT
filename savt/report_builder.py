@@ -530,6 +530,8 @@ def build_dashboard(report: AuditReport, parsed: dict, extras: dict) -> dict:
         "ethics_dashboard": extras.get("ethics_dashboard") or {},
         "content_dashboard": content_dashboard,
         "originality_dashboard": extras.get("originality_dashboard") or {},
+        "pipeline": report.metadata.get("pipeline") or parsed.get("pipeline") or [],
+        "structure_source": parsed.get("structure_source", "headings"),
     }
 
 

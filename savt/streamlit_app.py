@@ -584,6 +584,22 @@ def render_ethics(dashboard: dict) -> None:
         st.caption(f"{found}/{total} elementos éticos detectados en el texto")
 
 
+def render_pipeline_steps(pipeline: list[dict], structure_source: str | None = None) -> None:
+    """Muestra el flujo en cuatro momentos: índice → apartados → bibliografía → referencias."""
+    if not pipeline:
+        return
+    st.markdown("### Procesamiento del documento")
+    source_hint = "índice" if structure_source == "index" else "encabezados del texto"
+    st.caption(
+        f"Flujo en cuatro pasos. Apartados tomados del {source_hint}; "
+        "referencias solo del apartado bibliográfico (sin escanear el cuerpo)."
+    )
+    icons = {"ok": "✅", "warning": "⚠️", "error": "❌", "skipped": "⏭️"}
+    for step in pipeline:
+        icon = icons.get(step.get("status", ""), "•")
+        st.markdown(f"**{icon} {step.get('title', '—')}** — {step.get('summary', '')}")
+
+
 def render_document_data(dashboard: dict, report) -> None:
     from savt.ui_labels import citation_style_label
 
@@ -593,6 +609,11 @@ def render_document_data(dashboard: dict, report) -> None:
     st.markdown("## Datos del documento")
     st.caption(f"Perfil: {dashboard.get('profile_label', '—')}")
 
+    render_pipeline_steps(
+        dashboard.get("pipeline") or report.metadata.get("pipeline") or [],
+        dashboard.get("structure_source") or report.metadata.get("structure_source"),
+    )
+
     refs_used = bib.get("citations_found", 0)
     pages = report.metadata.get("pdf_page_count") or report.page_estimate
     citation_style = citation_style_label(report.metadata.get("citation_style"))
@@ -601,7 +622,7 @@ def render_document_data(dashboard: dict, report) -> None:
     with row1[0]:
         st.metric("Palabras (cuerpo)", f"{report.word_count:,}")
     with row1[1]:
-        st.metric("Referencias totales utilizadas", refs_used)
+        st.metric("Referencias en bibliografía", refs_used)
 
     row2 = st.columns(2)
     with row2[0]:
@@ -613,13 +634,17 @@ def render_document_data(dashboard: dict, report) -> None:
     if content.get("bibliography_words"):
         st.caption(f"Bibliografía: {content['bibliography_words']:,} palabras.")
 
-    sections = content.get("sections") or dashboard.get("detected_sections") or []
+    sections = dashboard.get("detected_sections") or content.get("sections") or []
     if sections:
         st.markdown("### Estructura del documento")
-        st.caption(help_text.get("sections", ""))
+        st.caption(
+            help_text.get("sections")
+            or "Apartados y extensión según el índice o los encabezados detectados."
+        )
         rows = [
             {
                 "Apartado": item.get("title", "—"),
+                "Pág. índice": item.get("page", "—"),
                 "Palabras": item.get("words", 0),
                 "% del total": item.get("percent_label", "—"),
             }

@@ -57,6 +57,20 @@ def run_audit(
     parsed = parse_thesis_file(source, filename=filename)
     config.resolve_for_document(parsed.get("full_text", ""), parsed.get("page_estimate", 0))
 
+    pipeline_steps = parsed.get("pipeline") or []
+    for idx, step in enumerate(pipeline_steps):
+        fraction = 0.02 + (idx + 1) * 0.06
+        payload: dict | None = None
+        if step.get("id") == "sections" and step.get("details", {}).get("sections"):
+            payload = {"detected_sections": step["details"]["sections"]}
+        _emit_progress(
+            on_progress,
+            step.get("title", "Procesando documento"),
+            step.get("summary", ""),
+            fraction,
+            payload,
+        )
+
     from savt.section_audit import detect_document_sections
 
     detected_sections = detect_document_sections(parsed)
@@ -155,6 +169,8 @@ def run_audit(
             "profile_id": config._resolved_profile_id or config.profile_id,
             "profile_label": config.profile.label,
             "document_title": parsed.get("document_title", ""),
+            "structure_source": parsed.get("structure_source"),
+            "pipeline": parsed.get("pipeline", []),
         },
     )
 
