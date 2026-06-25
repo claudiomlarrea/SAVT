@@ -630,27 +630,8 @@ def render_document_data(dashboard: dict, report) -> None:
     with row2[1]:
         st.metric("Estilo de citación", citation_style)
 
-    help_text = content.get("indicator_help") or {}
     if content.get("bibliography_words"):
         st.caption(f"Bibliografía: {content['bibliography_words']:,} palabras.")
-
-    sections = dashboard.get("detected_sections") or content.get("sections") or []
-    if sections:
-        st.markdown("### Estructura del documento")
-        st.caption(
-            help_text.get("sections")
-            or "Apartados y extensión según el índice o los encabezados detectados."
-        )
-        rows = [
-            {
-                "Apartado": item.get("title", "—"),
-                "Pág. índice": item.get("page", "—"),
-                "Palabras": item.get("words", 0),
-                "% del total": item.get("percent_label", "—"),
-            }
-            for item in sections
-        ]
-        st.dataframe(rows, hide_index=True)
 
     if formal:
         with st.expander("Normativa formal detectada", expanded=False):
@@ -942,23 +923,10 @@ def _run_app() -> None:
     if st.button("Ejecutar auditoría", type="primary"):
         progress_bar = st.progress(0.0)
         status_box = st.empty()
-        preview_box = st.empty()
 
         def on_progress(phase: str, detail: str, fraction: float, payload: dict | None = None) -> None:
             progress_bar.progress(min(max(fraction, 0.0), 1.0))
             status_box.markdown(f"**{phase}** — {detail}")
-            if payload and payload.get("detected_sections"):
-                preview_box.markdown("#### Apartados detectados hasta el momento")
-                preview_rows = [
-                    {
-                        "Apartado": s.get("title"),
-                        "Detectado como": s.get("detected_as"),
-                        "Palabras": s.get("words"),
-                        "%": s.get("percent_label"),
-                    }
-                    for s in payload["detected_sections"]
-                ]
-                preview_box.dataframe(preview_rows, hide_index=True)
 
         with st.spinner("Analizando tesis…"):
             from savt.audit import run_audit
@@ -971,7 +939,6 @@ def _run_app() -> None:
             )
         progress_bar.progress(1.0)
         status_box.success("Auditoría completada.")
-        preview_box.empty()
         try:
             from savt.usage_counter import record_audit_usage
 
