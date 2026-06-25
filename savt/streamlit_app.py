@@ -372,9 +372,7 @@ def render_bibliography(dashboard: dict) -> None:
     coverage_partial = bib["coverage"] not in ("adecuada", "—")
 
     summary_lines = [
-        f"{conformance_badge(bib.get('style_ok', True))} — Estilo de citación conforme"
-        if bib.get("style_ok", True)
-        else f"{conformance_badge(False)} — Estilo de citación a revisar",
+        f"{conformance_badge(bib.get('style_ok', True))} — Estilo {bib['style']} detectado",
     ]
     if bib["out_of_period"]:
         summary_lines.append(
