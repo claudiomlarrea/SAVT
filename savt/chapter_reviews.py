@@ -44,7 +44,7 @@ CHECK_GUIDANCE: dict[str, dict[str, str]] = {
     },
     "objetivos": {
         "why": "Los objetivos definen qué debe quedar resuelto al final del trabajo.",
-        "how_to_fix": "Liste objetivo general y objetivos específicos numerados, medibles y alineados con la pregunta.",
+        "how_to_fix": "Liste objetivo general y objetivos específicos, medibles y alineados con la pregunta.",
     },
     "diseño": {
         "why": "El diseño permite evaluar si el método responde a la pregunta planteada.",
@@ -456,9 +456,9 @@ def build_chapter_reviews(
         "ok": obj_ok,
         "partial": False,
         "summary": (
-            "Los objetivos específicos están formulados y detectados."
+            "Objetivo general y objetivos específicos detectados y formulados."
             if obj_ok
-            else "No se detectaron objetivos específicos numerados con claridad."
+            else "No se detectaron objetivo general u objetivos específicos con claridad."
         ),
         "why": CHECK_GUIDANCE["objetivos"]["why"] if not obj_ok else "Los objetivos guían la evaluación de coherencia interna.",
         "how_to_fix": CHECK_GUIDANCE["objetivos"]["how_to_fix"] if not obj_ok else "",

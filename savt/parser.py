@@ -507,49 +507,150 @@ def extract_research_questions(body: str) -> list[str]:
     return questions
 
 
-def _objectives_from_block(block: str) -> list[str]:
-    chunks = re.split(r"(?m)^\d+\.\s+", block.strip())
-    objectives: list[str] = []
-    for chunk in chunks:
-        chunk = chunk.strip()
-        if len(chunk) < 20 or re.search(r"\.{4,}", chunk):
-            continue
-        objectives.append(_normalize(chunk))
-    if objectives:
-        return objectives[:8]
+_OBJ_SECTION_NUM = r"(?:\d+(?:\.\d+)*\.?\s*)?"
+_OBJ_HEADING_GENERAL = rf"(?im)(?:^|\n)\s*{_OBJ_SECTION_NUM}Objetivo\s+general\b"
+_OBJ_HEADING_SPECIFIC = rf"(?im)(?:^|\n)\s*{_OBJ_SECTION_NUM}Objetivos\s+espec[ií]ficos\b"
+_OBJ_END_LOOKAHEAD = (
+    r"(?="
+    r"\n\s*(?:\d+(?:\.\d+)*\.?\s*)?"
+    r"(?:Supuestos|Hipótesis|Hipotesis|CAPÍTULO|CAPITULO|SEGUNDA|TERCERA|CUARTA|QUINTA|"
+    r"METODOLOG|MATERIALES|MARCO TE[OÓ]RICO|RESULTADOS|DISCUSI[ÓO]N|PARTE\s+[-–])"
+    r"|\Z)"
+)
+_BULLET_CHARS = r"[➤►•●○▪\u25b8\u25ba\u25cf\u25cb\u25aa\u2022\uf0d8\uf0b7\uf076]"
+_BULLET_PREFIX = re.compile(
+    rf"^\s*(?:{_BULLET_CHARS}|[-–—*]|\d+[\).\s]+)\s*",
+    re.UNICODE,
+)
+_INLINE_BULLET_SPLIT = re.compile(rf"\s*{_BULLET_CHARS}\s+")
 
-    objectives = []
-    for line in block.splitlines():
-        line = line.strip()
-        line = re.sub(r"^\d+[\).\s]+", "", line)
-        if len(line) > 20 and not re.search(r"\.{4,}", line):
-            objectives.append(_normalize(line))
-    return objectives[:8]
+
+def _looks_like_section_heading(text: str) -> bool:
+    stripped = text.strip()
+    if re.match(
+        r"(?i)^(materiales|metodolog|marco te[oó]rico|marco conceptual|cap[ií]tulo|"
+        r"hip[oó]tesis|resultados|discusi[oó]n|conclusi[oó]n|introducci[oó]n)\b",
+        stripped,
+    ):
+        return True
+    letters = re.sub(r"[^A-Za-zÁÉÍÓÚáéíóúñ]", "", stripped)
+    if len(letters) < 20 and stripped.upper() == stripped and letters:
+        return True
+    return False
+
+
+def objectives_headings_present(body: str) -> bool:
+    """True cuando el documento declara objetivo general y objetivos específicos por título."""
+    if not body:
+        return False
+    return bool(re.search(_OBJ_HEADING_GENERAL, body) and re.search(_OBJ_HEADING_SPECIFIC, body))
+
+
+def _trim_objectives_block(block: str) -> str:
+    block = re.sub(
+        r"(?is)\s*(?:\d+(?:\.\d+)*\.?\s*)?Objetivos\s+espec[ií]ficos\s*",
+        "",
+        block,
+        count=1,
+    ).strip()
+    block = re.split(
+        r"(?im)\n\s*(?:\d+(?:\.\d+)*\.?\s*)?(?:Hipótesis|Metodolog|Materiales|MARCO te[oó]rico|CAP[IÍ]TULO)\b",
+        block,
+        maxsplit=1,
+    )[0].strip()
+    return block
+
+
+def _clean_objective_text(text: str) -> str:
+    cleaned = _BULLET_PREFIX.sub("", text.strip())
+    cleaned = re.sub(rf"^({_BULLET_CHARS})\s*", "", cleaned)
+    return _normalize(cleaned)
+
+
+def _objective_item_ok(text: str) -> bool:
+    return len(text) >= 20 and not re.search(r"\.{4,}", text) and not _looks_like_section_heading(text)
+
+
+def _objectives_from_block(block: str) -> list[str]:
+    block = _trim_objectives_block(block.strip())
+    if not block:
+        return []
+
+    objectives: list[str] = []
+    current = ""
+    for raw_line in block.splitlines():
+        line = raw_line.strip()
+        if not line:
+            if current:
+                objectives.append(_clean_objective_text(current))
+                current = ""
+            continue
+
+        is_item = bool(_BULLET_PREFIX.match(line) or re.match(r"^\d+[\).\s]+", line))
+        if is_item:
+            if current:
+                objectives.append(_clean_objective_text(current))
+            current = _BULLET_PREFIX.sub("", line)
+            current = re.sub(r"^\d+[\).\s]+", "", current).strip()
+        elif current:
+            current = f"{current} {line}"
+        elif _objective_item_ok(line):
+            current = line
+
+    if current:
+        objectives.append(_clean_objective_text(current))
+
+    objectives = [o for o in objectives if _objective_item_ok(o)]
+    if len(objectives) >= 2:
+        return objectives[:12]
+
+    inline_parts = [
+        _clean_objective_text(p.strip()) for p in _INLINE_BULLET_SPLIT.split(block) if _objective_item_ok(p.strip())
+    ]
+    if len(inline_parts) >= 2:
+        return inline_parts[:12]
+
+    numbered = re.split(r"(?m)^\d+[\).\s]+", block)
+    numbered = [_normalize(chunk.strip()) for chunk in numbered if _objective_item_ok(chunk.strip())]
+    if len(numbered) >= 2:
+        return numbered[:12]
+
+    if _objective_item_ok(block):
+        return [_normalize(block)][:1]
+    return []
+
+
+def _find_specific_objectives_block(body: str) -> str:
+    patterns = [
+        rf"(?is)Objetivos\s+espec[ií]ficos\s*(.+?){_OBJ_END_LOOKAHEAD}",
+        rf"(?is){_OBJ_SECTION_NUM}Objetivos\s+espec[ií]ficos\s*(.+?){_OBJ_END_LOOKAHEAD}",
+        r"1\.5\.2 Objetivos específicos(.+?)(?:CAPÍTULO II|CAPITULO II)",
+        r"(?is)Objetivos específicos\s*\n(.+?)(?:\n5\.\s+Hipótesis|\nHipótesis de investigación|\nHipótesis|\n\d+\.\s+Metodolog|\nCapítulo|\nMETODOLOG)",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, body, re.IGNORECASE | re.DOTALL)
+        if match:
+            return match.group(1).strip()
+    return ""
 
 
 def extract_objectives(body: str) -> list[str]:
-    patterns = [
-        r"(?is)(?:\d+(?:\.\d+)*\.?\s*)?Objetivos\s+espec[ií]ficos\s*(.+?)"
-        r"(?=\n\s*(?:Supuestos|Hipótesis|CAPÍTULO|CAPITULO|SEGUNDA|TERCERA|CUARTA|QUINTA|"
-        r"METODOLOG|MATERIALES|PARTE\s+[-–]|\Z))",
-        r"1\.5\.2 Objetivos específicos(.+?)(?:CAPÍTULO II|CAPITULO II)",
-        r"Objetivos específicos\s*\n(.+?)(?:\n5\.\s+Hipótesis|\nHipótesis de investigación|\nHipótesis|\n\d+\.\s+Metodolog|\nCapítulo|\nMETODOLOG)",
-    ]
-    for pattern in patterns:
-        block_match = re.search(pattern, body, re.IGNORECASE | re.DOTALL)
-        if not block_match:
-            continue
-        objectives = _objectives_from_block(block_match.group(1))
-        if objectives:
-            return objectives
-
     from savt.section_resolver import get_canonical_section
 
-    obj_section = get_canonical_section(body, "objetivos")
-    if obj_section:
-        objectives = _objectives_from_block(obj_section)
+    for source in (
+        _find_specific_objectives_block(body),
+        get_canonical_section(body, "objetivos") or "",
+    ):
+        if not source:
+            continue
+        objectives = _objectives_from_block(source)
         if objectives:
             return objectives
+
+    if objectives_headings_present(body):
+        block = _trim_objectives_block(_find_specific_objectives_block(body))
+        if _objective_item_ok(block):
+            return [_normalize(block)]
     return []
 
 

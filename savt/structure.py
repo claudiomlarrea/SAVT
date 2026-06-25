@@ -6,6 +6,7 @@ from savt.models import Finding
 
 
 from savt.document_sections import extract_section, get_section_map
+from savt.parser import objectives_headings_present
 from savt.section_resolver import get_canonical_section
 
 
@@ -81,7 +82,7 @@ def _merge_intro_checks(checks: list[dict], parsed: dict) -> list[dict]:
         ok = check["ok"]
         if label == "pregunta" and parsed.get("research_questions"):
             ok = True
-        if label == "objetivos" and parsed.get("objectives"):
+        if label == "objetivos" and (parsed.get("objectives") or objectives_headings_present(parsed.get("body", ""))):
             ok = True
         merged.append({**check, "ok": ok})
     return merged
@@ -264,7 +265,7 @@ def audit_structure(parsed: dict) -> tuple[list[Finding], dict]:
     )
     objectives_ok = any(c["ok"] for c in intro_checks if c["label"] == "objetivos") or bool(
         parsed.get("objectives")
-    )
+    ) or objectives_headings_present(body)
     conclusions_objectives = objectives_ok and len(conclusions_block) > 300
     explicit_answer = "en respuesta a la pregunta" in conclusions_block.lower()
     question_keywords = parsed.get("research_questions", [""])[0].lower() if parsed.get("research_questions") else ""

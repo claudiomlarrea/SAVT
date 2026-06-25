@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 
 from savt.models import Finding
+from savt.parser import objectives_headings_present
 
 STOPWORDS = {
     "analizar",
@@ -61,15 +62,27 @@ def audit_objectives_coherence(parsed: dict) -> tuple[list[Finding], list[dict]]
     evaluations: list[dict] = []
 
     if not objectives:
+        if objectives_headings_present(body):
+            findings.append(
+                Finding(
+                    module="Objetivos",
+                    severity="ok",
+                    area="Coherencia",
+                    title="Objetivo general y objetivos específicos detectados",
+                    detail="Se identificaron los apartados por título; la lista específica usa viñetas u otro formato no numerado.",
+                    why="Los objetivos guían la evaluación de coherencia interna.",
+                )
+            )
+            return findings, evaluations
         findings.append(
             Finding(
                 module="Objetivos",
                 severity="warning",
                 area="Coherencia",
                 title="No se detectaron objetivos específicos",
-                detail="No fue posible extraer objetivos numerados del documento.",
+                detail="No fue posible extraer objetivos del documento.",
                 why="Los objetivos guían la evaluación de coherencia interna.",
-                how_to_fix="Liste objetivos específicos numerados en la introducción.",
+                how_to_fix="Incluya objetivo general y objetivos específicos en la introducción o marco metodológico.",
             )
         )
         return findings, evaluations

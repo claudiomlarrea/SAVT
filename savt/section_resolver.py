@@ -368,14 +368,17 @@ def _scan_major_section_spans(body: str) -> list[tuple[int, str, str]]:
     return unique
 
 
+_OBJ_SECTION_NUM = r"(?:\d+(?:\.\d+)*\.?\s*)?"
+
+
 def _extract_objetivos_block(body: str) -> tuple[str, list[str]]:
     titles: list[str] = []
     start = None
     for pattern in (
-        r"(?im)(?:^|\n)\s*\d+\.?\s*Objetivo general\b",
-        r"(?im)(?:^|\n)\s*Objetivo general\b",
-        r"(?im)(?:^|\n)\s*\d+\.?\s*Objetivos espec[ií]ficos\b",
-        r"(?im)(?:^|\n)\s*Objetivos espec[ií]ficos\b",
+        rf"(?im)(?:^|\n)\s*{_OBJ_SECTION_NUM}Objetivo general\b",
+        rf"(?im)(?:^|\n)\s*Objetivo general\b",
+        rf"(?im)(?:^|\n)\s*{_OBJ_SECTION_NUM}Objetivos espec[ií]ficos\b",
+        rf"(?im)(?:^|\n)\s*Objetivos espec[ií]ficos\b",
     ):
         match = re.search(pattern, body)
         if match:
@@ -398,7 +401,7 @@ def _infer_introduccion_block(body: str, spans: list[tuple[int, str, str]]) -> t
         return "", []
 
     marco_pos = min((pos for pos, role, _ in spans if role == "marco_teorico"), default=len(body))
-    obj_match = re.search(r"(?im)(?:^|\n)\s*(?:\d+\.?\s*)?Objetivo general\b", body)
+    obj_match = re.search(rf"(?im)(?:^|\n)\s*{_OBJ_SECTION_NUM}Objetivo general\b", body)
     obj_start = obj_match.start() if obj_match and obj_match.start() < marco_pos else marco_pos
     end_pos = min(marco_pos, obj_start)
 
@@ -488,7 +491,7 @@ def build_enriched_section_map(
         meta[role] = {"detected_titles": list(info.get("detected_titles", []))}
 
     intro_text, intro_titles = _infer_introduccion_block(body, spans)
-    obj_early = re.search(r"(?im)(?:^|\n)\s*(?:\d+\.?\s*)?Objetivo general\b", body)
+    obj_early = re.search(rf"(?im)(?:^|\n)\s*{_OBJ_SECTION_NUM}Objetivo general\b", body)
     if obj_early and obj_early.start() > 80:
         pre_obj = body[: obj_early.start()].strip()
         if _word_count(pre_obj) >= 50:
@@ -648,7 +651,7 @@ def _find_objetivos_start(body: str, *, before_pos: int | None = None) -> tuple[
             "Pregunta de investigación",
         ),
         (
-            r"(?im)(?:^|\n)\s*(?:[1-3]\.?\s+)?Objetivo general",
+            rf"(?im)(?:^|\n)\s*{_OBJ_SECTION_NUM}Objetivo general",
             "Objetivos",
         ),
         (
@@ -656,7 +659,7 @@ def _find_objetivos_start(body: str, *, before_pos: int | None = None) -> tuple[
             "Objetivos",
         ),
         (
-            r"(?im)(?:^|\n)\s*Objetivos espec[ií]ficos\b",
+            rf"(?im)(?:^|\n)\s*{_OBJ_SECTION_NUM}Objetivos espec[ií]ficos\b",
             "Objetivos específicos",
         ),
     ]

@@ -9,6 +9,7 @@ from savt.chapter_reviews import (
 )
 from savt.content_quality import reconcile_section_depth_with_reviews
 from savt.models import AuditReport, Finding
+from savt.parser import objectives_headings_present
 from savt.section_audit import (
     build_citation_reconciliation,
     build_section_audits,
@@ -465,7 +466,8 @@ def build_dashboard(report: AuditReport, parsed: dict, extras: dict) -> dict:
         extras.get("structure", {}),
         bib_dashboard,
         warnings_list,
-        bool(report.metadata.get("objectives")),
+        bool(report.metadata.get("objectives"))
+        or objectives_headings_present(parsed.get("body", "")),
     )
     checklist = build_submission_checklist(chapter_reviews)
     readiness = checklist["status"]
