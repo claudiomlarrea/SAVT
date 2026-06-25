@@ -73,5 +73,15 @@ def normalize_bibliography_text(bib_text: str) -> str:
     return text
 
 
+def clean_pdf_extraction_garbage(text: str) -> str:
+    """Elimina bytes nulos y ruido típico de PDFs con fuentes CID mal embebidas."""
+    if not text:
+        return text
+    if "\x00" in text:
+        text = text.replace("\x00", "")
+    text = re.sub(r"[\u200b-\u200f\u202a-\u202e\ufeff]", "", text)
+    return text
+
+
 def normalize_full_document_text(text: str) -> str:
-    return collapse_soft_line_breaks(text)
+    return collapse_soft_line_breaks(clean_pdf_extraction_garbage(text))

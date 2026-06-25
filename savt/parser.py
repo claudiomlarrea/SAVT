@@ -27,23 +27,94 @@ BIB_HEADING = re.compile(
     r"(?m)^\s*(?:[A-ZÁÉÍÓÚÑ]{2,12}\s+)?BIBLIOGRAF[IÍÁ][A-Z]*\s*$",
     re.IGNORECASE,
 )
-BIB_HEADING_APA = re.compile(
-    r"(?m)^\s*BIBLIOGRAF[IÍÁ][A-Z]*\s+[A-ZÁÉÍÓÚÑ]",
+BIB_HEADING_NUMBERED = re.compile(
+    r"(?m)^\s*\d+\.?\s*BIBLIOGRAF[IÍÁ][A-Z]*\s*(?:\n|$)",
     re.IGNORECASE,
 )
-BIB_HEADING_NUMBERED = re.compile(
-    r"BIBLIOGRAF[IÍÁ][A-Z]*\s*\n\s*\d+\.\s",
+BIB_HEADING_LINE = re.compile(
+    r"(?m)^\s*BIBLIOGRAF[IÍÁ][A-Z]*\s*\n",
     re.IGNORECASE,
 )
 REFERENCIAS_HEADING = re.compile(r"(?m)^\s*REFERENCIAS\s*$", re.IGNORECASE)
+BIB_SUBSECTION = re.compile(
+    r"(?i)LEGISLATIVA|JURISPRUDENC|NORMATIVA|CONSULTADA|BIBLIOGRAF[IÍ]AS\s+WEB|FUENTES\s+CONSULTADAS"
+)
+APA_BIB_ENTRY_HINT = re.compile(
+    r"(?m)^[A-ZÁÉÍÓÚÑ\"(][^\n]{4,80},\s*[A-ZÁÉÍÓÚa-záéíóúñ]"
+)
+NUMBERED_BIB_ENTRY_HINT = re.compile(r"(?m)^\d+\.\s+[A-Za-zÁÉÍÓÚáéíóúñ\"(]")
+
+
+def _bibliography_heading_line(full_text: str, pos: int) -> str:
+    end = full_text.find("\n", pos)
+    if end == -1:
+        end = min(pos + 160, len(full_text))
+    return full_text[pos:end]
+
+
+def _is_index_bibliography_line(line: str, pos: int, doc_len: int) -> bool:
+    if re.search(r"\(pag\.", line, re.I):
+        return pos < doc_len * 0.15
+    return bool(re.search(r"\.{3,}\s*\d+\s*$", line))
+
+
+def _score_bibliography_candidate(full_text: str, pos: int) -> int:
+    line = _bibliography_heading_line(full_text, pos)
+    if not re.search(r"(?i)BIBLIOGRAF|REFERENCIAS", line[:60]):
+        return -100
+    if BIB_SUBSECTION.search(line):
+        return -100
+    if _is_index_bibliography_line(line, pos, len(full_text)):
+        return -50
+
+    score = 0
+    if re.match(r"(?i)^\s*\d+\.?\s*BIBLIOGRAF", line):
+        score += 70
+    elif re.match(r"(?i)^\s*BIBLIOGRAF", line):
+        score += 55
+    elif re.match(r"(?i)^\s*REFERENCIAS\s*$", line):
+        score += 50
+
+    relative = pos / max(len(full_text), 1)
+    if relative > 0.55:
+        score += 30
+    elif relative > 0.4:
+        score += 15
+
+    following = full_text[pos : pos + 8000]
+    apa_entries = len(APA_BIB_ENTRY_HINT.findall(following))
+    numbered_entries = len(NUMBERED_BIB_ENTRY_HINT.findall(following))
+    score += min(apa_entries + numbered_entries, 35)
+    return score
 
 
 def _bibliography_start_positions(full_text: str) -> list[int]:
-    positions: list[int] = []
-    for pattern in (BIB_HEADING, BIB_HEADING_APA, BIB_HEADING_NUMBERED):
-        positions.extend(match.start() for match in pattern.finditer(full_text))
-    positions.extend(match.start() for match in REFERENCIAS_HEADING.finditer(full_text))
-    return positions
+    candidates: set[int] = set()
+    inline_patterns = [
+        r"(?im)^\s*(?:\d+\.?\s*)?BIBLIOGRAF[IÍÁ][A-Z]*\s*(?:\n|$)",
+        r"(?im)^\s*REFERENCIAS\s*$",
+        r"(?im)\n\n\s*(?:\d+\.?\s*)?BIBLIOGRAF[IÍÁ][A-Z]*\s*(?:\n\s*)?(?=[A-ZÁÉÍÓÚ\"(])",
+        r"(?im)\n\n\s*BIBLIOGRAF[IÍÁ][A-Z]*\s*(?:\n\s*)?(?=[A-ZÁÉÍÓÚ\"(])",
+        r"(?im)(?:^|\n\n)\s*BIBLIOGRAF[IÍÁ][A-Z]*\s*\n\s*\d+\.\s+[A-Za-zÁÉÍÓÚ\"(]",
+    ]
+    heading_in_match = re.compile(r"(?i)(?:\d+\.?\s*)?BIBLIOGRAF[IÍÁ][A-Z]*|^REFERENCIAS")
+    for pattern in inline_patterns:
+        for match in re.finditer(pattern, full_text):
+            chunk = match.group(0)
+            heading = heading_in_match.search(chunk)
+            if heading:
+                candidates.add(match.start() + heading.start())
+
+    for pattern in (BIB_HEADING_NUMBERED, BIB_HEADING, BIB_HEADING_LINE, REFERENCIAS_HEADING):
+        for match in pattern.finditer(full_text):
+            candidates.add(match.start())
+
+    scored = [(pos, _score_bibliography_candidate(full_text, pos)) for pos in candidates]
+    scored = [(pos, score) for pos, score in scored if score > 0]
+    if not scored:
+        return []
+    best_score = max(score for _, score in scored)
+    return [pos for pos, score in scored if score >= best_score - 5]
 RESEARCH_QUESTION = re.compile(
     r"¿[^?]+\?",
     re.MULTILINE,
@@ -88,10 +159,18 @@ def extract_text_from_docx(source: BinaryIO | str) -> str:
 def split_body_and_bibliography(full_text: str) -> tuple[str, str]:
     positions = _bibliography_start_positions(full_text)
     if positions:
-        idx = max(positions)
+        best_score = max(_score_bibliography_candidate(full_text, pos) for pos in positions)
+        top = [pos for pos in positions if _score_bibliography_candidate(full_text, pos) >= best_score - 2]
+        idx = max(top)
         body = full_text[:idx].strip()
         bib = full_text[idx:].strip()
-        bib = re.sub(r"^(?:[A-ZÁÉÍÓÚÑ]{2,12}\s+)?BIBLIOGRAF[IÍÁ][A-Z]*\s*", "BIBLIOGRAFÍA\n", bib, flags=re.IGNORECASE)
+        bib = re.sub(
+            r"^(?:\d+\.?\s*)?(?:[A-ZÁÉÍÓÚÑ]{2,12}\s+)?BIBLIOGRAF[IÍÁ][A-Z]*\s*",
+            "BIBLIOGRAFÍA\n",
+            bib,
+            count=1,
+            flags=re.IGNORECASE,
+        )
         bib = re.sub(r"^REFERENCIAS\s*", "REFERENCIAS\n", bib, flags=re.IGNORECASE)
         return body, bib
     return full_text, ""
@@ -493,53 +572,87 @@ def estimate_pages(word_count: int, words_per_page: int = 300) -> float:
     return round(word_count / words_per_page, 1)
 
 
+def _citations_from_bibliography(
+    bibliography: dict[int, ReferenceEntry],
+    style: str,
+) -> tuple[set[int], set[str]]:
+    """Las referencias se toman solo del apartado bibliográfico, no del cuerpo."""
+    if style == "apa":
+        keys = {ref.key for ref in bibliography.values() if ref.key}
+        return set(), keys
+    return set(bibliography.keys()), set()
+
+
 def parse_thesis_file(source: BinaryIO | str, filename: str = "tesis.docx") -> dict:
     from savt.bibliography_styles import (
         detect_citation_style,
-        extract_apa_citations,
         infer_topic_keywords_from_document,
         parse_bibliography_by_style,
     )
     from savt.document_sections import extract_title
+    from savt.index_structure import page_char_offsets, partition_from_index
     from savt.pdf_parser import prepare_pdf_text, remove_pdf_front_matter
     from savt.text_normalize import normalize_full_document_text
 
     pdf_page_count = None
+    page_offsets: list[int] = []
     lower_name = filename.lower()
+    index_layout: dict | None = None
+
     if lower_name.endswith(".pdf"):
-        full_text, pdf_page_count = prepare_pdf_text(source)
-        full_text = normalize_full_document_text(full_text)
-        body_raw, bib_text = split_body_and_bibliography(full_text)
-        body = remove_pdf_front_matter(body_raw)
+        full_text_raw, pdf_page_count, page_texts = prepare_pdf_text(source)
+        norm_pages = [normalize_full_document_text(page) for page in page_texts]
+        full_text = "\n".join(norm_pages)
+        page_offsets = page_char_offsets(norm_pages)
+        index_layout = partition_from_index(
+            full_text,
+            page_offsets=page_offsets,
+            page_count=pdf_page_count,
+        )
+        if index_layout:
+            body = index_layout["body"]
+            bib_text = index_layout["bibliography_text"]
+            section_map = index_layout["section_map"]
+            section_meta = index_layout["section_meta"]
+        else:
+            body_raw, bib_text = split_body_and_bibliography(full_text)
+            body = remove_pdf_front_matter(body_raw)
+            from savt.section_resolver import build_enriched_section_map
+
+            section_map, section_meta = build_enriched_section_map(body)
     else:
         full_text = extract_text_from_docx(source)
-        body_raw, bib_text = split_body_and_bibliography(full_text)
-        body = remove_index_duplicate(body_raw)
+        full_text = normalize_full_document_text(full_text)
+        index_layout = partition_from_index(full_text)
+        if index_layout:
+            body = index_layout["body"]
+            bib_text = index_layout["bibliography_text"]
+            section_map = index_layout["section_map"]
+            section_meta = index_layout["section_meta"]
+        else:
+            body_raw, bib_text = split_body_and_bibliography(full_text)
+            body = remove_index_duplicate(body_raw)
+            from savt.section_resolver import build_enriched_section_map
 
-    citation_style = detect_citation_style(body, bib_text)
-    bibliography = parse_bibliography_by_style(bib_text, citation_style)
+            section_map, section_meta = build_enriched_section_map(body)
+
+    bib_for_parse = re.sub(
+        r"^(?:\d+\.?\s*)?(?:[A-ZÁÉÍÓÚÑ]{2,12}\s+)?BIBLIOGRAF[IÍÁ][A-Z]*\s*",
+        "BIBLIOGRAFÍA\n",
+        bib_text,
+        count=1,
+        flags=re.IGNORECASE,
+    )
+    citation_style = detect_citation_style("", bib_for_parse)
+    bibliography = parse_bibliography_by_style(bib_for_parse, citation_style)
     sections = split_sections(body)
     conclusions = extract_conclusions(body)
-    from savt.section_resolver import build_enriched_section_map
-
-    section_map, section_meta = build_enriched_section_map(
-        body,
-        conclusions_text=conclusions,
-    )
     topic_keywords = infer_topic_keywords_from_document(full_text, body, filename)
     document_title = extract_title(full_text, filename)
 
-    if citation_style == "apa":
-        cited_keys, citation_contexts = extract_apa_citations(body)
-        cited_numbers: set[int] = set()
-        citation_contexts_numbered: list[tuple[int, str]] = []
-        citation_contexts_keys: list[tuple[str, str]] = citation_contexts
-    else:
-        cited_keys = set()
-        bib_max = _numbered_bibliography_max(bibliography)
-        cited_numbers = extract_cited_numbers(body, max_ref=bib_max)
-        citation_contexts_numbered = extract_citation_contexts(body, max_ref=bib_max)
-        citation_contexts_keys = []
+    cited_numbers, cited_keys = _citations_from_bibliography(bibliography, citation_style)
+    citation_contexts_numbered: list[tuple[int, str]] = []
+    citation_contexts_keys: list[tuple[str, str]] = []
 
     bib_words = count_words(bib_text)
     body_words = count_words(body)
@@ -561,6 +674,8 @@ def parse_thesis_file(source: BinaryIO | str, filename: str = "tesis.docx") -> d
         "sections": sections,
         "section_map": section_map,
         "section_meta": section_meta,
+        "index_sections": (index_layout or {}).get("index_sections", []),
+        "structure_source": (index_layout or {}).get("structure_source", "headings"),
         "cited_numbers": cited_numbers,
         "cited_keys": cited_keys,
         "citation_contexts": citation_contexts_numbered,

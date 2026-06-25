@@ -27,6 +27,19 @@ CANONICAL_SECTION_ORDER: tuple[tuple[str, str], ...] = (
 
 
 def _partition_word_map(parsed: dict) -> tuple[dict[str, str], dict[str, dict]]:
+    index_sections = parsed.get("index_sections") or []
+    if index_sections and parsed.get("structure_source") == "index":
+        partition = dict(parsed.get("section_map") or {})
+        meta = dict(parsed.get("section_meta") or {})
+        full_text = parsed.get("full_text", "")
+        if full_text:
+            abstract_text, _abstract_words, abstract_kind = extract_abstract(full_text)
+            if abstract_text and count_words(abstract_text) >= 40:
+                partition["presentacion"] = abstract_text
+                label = "Resumen" if abstract_kind == "resumen" else "Presentación / resumen"
+                meta["presentacion"] = {"detected_titles": [label]}
+        return partition, meta
+
     body = parsed.get("body", "")
     partition, meta = build_non_overlapping_word_partition(body)
 

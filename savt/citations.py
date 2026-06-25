@@ -57,10 +57,10 @@ def is_reference_topical(reference: ReferenceEntry, keywords: list[str]) -> bool
 def _audit_numbered_citations(parsed: dict, keywords: list[str]) -> list[Finding]:
     findings: list[Finding] = []
     bibliography: dict[int, ReferenceEntry] = parsed["bibliography"]
-    cited: set[int] = parsed["cited_numbers"]
-    body = parsed["body"]
-
     bib_nums = set(bibliography.keys())
+    if not bib_nums:
+        return findings
+
     expected = set(range(1, max(bib_nums) + 1))
     gaps = sorted(expected - bib_nums)
     if gaps:
@@ -73,100 +73,30 @@ def _audit_numbered_citations(parsed: dict, keywords: list[str]) -> list[Finding
                 evidence=f"Última referencia detectada: {max(bib_nums)}",
             )
         )
-
-    missing_in_bib = sorted(cited - bib_nums)
-    if missing_in_bib:
-        findings.append(
-            Finding(
-                module="Bibliografía",
-                severity="error",
-                title="Citas sin entrada bibliográfica",
-                detail=f"Referencias citadas en el texto pero ausentes en bibliografía: {missing_in_bib[:20]}",
-            )
-        )
-
-    uncited = sorted(bib_nums - cited)
-    if uncited:
-        findings.append(
-            Finding(
-                module="Bibliografía",
-                severity="warning",
-                title="Referencias bibliográficas no citadas",
-                detail=f"Entradas en bibliografía que no aparecen en el cuerpo: {uncited[:20]}",
-            )
-        )
     else:
         findings.append(
             Finding(
                 module="Bibliografía",
                 severity="ok",
-                title="Correspondencia citas ↔ bibliografía",
-                detail="Todas las referencias numeradas fueron citadas al menos una vez.",
+                title="Bibliografía numerada detectada",
+                detail=f"Se detectaron {len(bibliography)} referencias en el apartado bibliográfico.",
             )
         )
-
-    mismatches: list[str] = []
-    for ref_num, paragraph in parsed.get("citation_contexts", []):
-        ref = bibliography.get(ref_num)
-        if not ref:
-            continue
-        score = topical_score(ref, paragraph, keywords)
-        if score < 0.08 and not is_reference_topical(ref, keywords):
-            snippet = paragraph[:160].replace("\n", " ")
-            mismatches.append(f"[{ref_num}] score={score:.2f} → …{snippet}…")
-
-    if mismatches:
-        findings.append(
-            Finding(
-                module="Bibliografía",
-                severity="warning",
-                title="Posible desajuste cita ↔ contenido del párrafo",
-                detail="Algunas citas numeradas parecen poco relacionadas con el párrafo donde aparecen.",
-                evidence="\n".join(mismatches[:8]),
-            )
-        )
-
     return findings
 
 
 def _audit_apa_citations(parsed: dict, keywords: list[str]) -> list[Finding]:
     findings: list[Finding] = []
     bibliography: dict[int, ReferenceEntry] = parsed["bibliography"]
-    cited_keys: set[str] = parsed.get("cited_keys", set())
-    bib_keys = {ref.key for ref in bibliography.values() if ref.key}
-
-    missing_in_bib = sorted(key for key in cited_keys if not apa_keys_match(key, bib_keys))
-    # Detalle de citas sin match en bibliography_analysis.py; no marcar «ok» si hay faltantes.
-
-    uncited = sorted(key for key in bib_keys if not any(apa_keys_match(key, {cited}) for cited in cited_keys))
-    if uncited and len(uncited) > len(bib_keys) * 0.35:
-        findings.append(
-            Finding(
-                module="Bibliografía",
-                severity="warning",
-                title="Muchas referencias APA no detectadas como citadas",
-                detail=(
-                    f"{len(uncited)} entradas no fueron reconocidas en el texto. "
-                    "En PDF es común por cortes de línea o citas narrativas."
-                ),
-                evidence=", ".join(uncited[:12]),
-            )
-        )
-    elif bib_keys and cited_keys and not missing_in_bib:
-        coverage = sum(1 for key in cited_keys if apa_keys_match(key, bib_keys)) / max(len(cited_keys), 1)
+    if bibliography:
         findings.append(
             Finding(
                 module="Bibliografía",
                 severity="ok",
-                title="Correspondencia citas APA ↔ bibliografía",
-                detail=(
-                    f"Se detectaron {len(cited_keys)} claves autor-año en el texto y "
-                    f"{len(bibliography)} referencias bibliográficas "
-                    f"(coincidencia directa: {coverage:.0%})."
-                ),
+                title="Bibliografía APA detectada",
+                detail=f"Se detectaron {len(bibliography)} referencias en el apartado bibliográfico.",
             )
         )
-
     return findings
 
 

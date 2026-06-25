@@ -351,11 +351,7 @@ def build_bibliography_details(
         item["pages_label"] = format_pages(cite_pages) if cite_pages else "solo en bibliografía"
     findings.extend(doi_findings)
 
-    bib_keys = {ref.key for ref in bibliography.values() if ref.key}
-    if style == "apa":
-        unmatched_count = len(unmatched_apa)
-    else:
-        unmatched_count = len(parsed.get("cited_numbers", set()) - set(bibliography.keys()))
+    unmatched_count = len(unmatched_apa) if style == "apa" else 0
 
     coverage = "adecuada"
     if unmatched_count > 5 or invalid or not_resolved:

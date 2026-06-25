@@ -66,7 +66,25 @@ GLOBAL_SECTIONS = (
 
 
 def detect_document_sections(parsed: dict) -> list[dict]:
-    """Apartados detectados en el documento cargado (partición sin solapamiento)."""
+    """Apartados detectados en el documento (índice preferido; partición sin solapamiento)."""
+    if parsed.get("index_sections") and parsed.get("structure_source") == "index":
+        sections: list[dict] = []
+        for idx, item in enumerate(parsed["index_sections"], start=1):
+            sections.append(
+                {
+                    "role": item.get("role", "otros"),
+                    "title": item.get("title", "—"),
+                    "detected_as": item.get("title", "—"),
+                    "words": item.get("words", 0),
+                    "percent": item.get("percent", 0),
+                    "percent_label": item.get("percent_label", "—"),
+                    "order": idx,
+                    "page": item.get("page"),
+                    "source": "index",
+                }
+            )
+        return sections
+
     role_texts, meta = get_section_word_partition(parsed)
     total = max(parsed.get("word_count") or 0, 1)
 

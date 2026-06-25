@@ -54,6 +54,10 @@ CANONICAL_ROLES: dict[str, tuple[str, ...]] = {
         "marco de referencia",
         "bases teóricas",
         "bases teoricas",
+        "realidad del fenómeno",
+        "realidad del fenomeno",
+        "violencia y los jóvenes",
+        "violencia y los jovenes",
     ),
     "metodologia": (
         "metodología",
@@ -73,6 +77,10 @@ CANONICAL_ROLES: dict[str, tuple[str, ...]] = {
         "diseno del estudio",
         "enfoque metodológico",
         "enfoque metodologico",
+        "parte empírica",
+        "parte empirica",
+        "parte empírica del estudio",
+        "parte empirica del estudio",
     ),
     "resultados": (
         "resultados",
@@ -103,6 +111,8 @@ CANONICAL_ROLES: dict[str, tuple[str, ...]] = {
         "conclusiones generales",
         "conclusiones y recomendaciones",
         "conclusiones finales",
+        "discusión y conclusiones",
+        "discusion y conclusiones",
     ),
     "objetivos": (
         "objetivos específicos",
@@ -119,12 +129,19 @@ PART_ROLE_HINTS: dict[str, str] = {
     "encuadre": "marco_teorico",
     "teorico": "marco_teorico",
     "teórico": "marco_teorico",
+    "teoria": "marco_teorico",
+    "teoría": "marco_teorico",
+    "fenomeno": "marco_teorico",
+    "fenómeno": "marco_teorico",
+    "marco": "marco_teorico",
     "metodolog": "metodologia",
     "empiric": "metodologia",
+    "empíric": "metodologia",
     "resultado": "resultados",
     "analisis": "resultados",
     "análisis": "resultados",
     "conclus": "conclusiones",
+    "discusi": "discusion",
 }
 
 
@@ -673,6 +690,65 @@ def _chapter_subtitle_to_role(subtitle: str) -> tuple[str | None, str]:
     return role, clean
 
 
+_NUMBERED_SECTION = re.compile(
+    r"(?m)^\s*(\d{1,2})(?:\.(?![0-9])|\.\s+|\s+)\s*"
+    r"([A-ZÁÉÍÓÚÑ][^\n]{6,140}?)(?:\s*\(pag\.[^)]*\))?\s*$",
+    re.IGNORECASE,
+)
+
+
+def _numbered_section_title(body: str, match: re.Match[str]) -> str:
+    title = re.sub(r"\s+", " ", match.group(2)).strip()
+    tail = body[match.end() : match.end() + 120]
+    continuation = re.match(
+        r"^\s*\n\s*([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑ\s]{4,70})\s*(?:\n|$)",
+        tail,
+    )
+    if continuation and len(continuation.group(1).split()) <= 8:
+        title = f"{title} {continuation.group(1).strip()}"
+    return title
+
+
+_SECTION_TITLE_HINT = re.compile(
+    r"(?i)introducci|planteamiento|marco|teor[ií]a|metodolog|emp[ií]ric|resultado|"
+    r"discusi|conclus|fen[oó]meno|violencia|antecedent|encuadre|objetivo|hip[oó]tesis"
+)
+
+
+def _find_numbered_section_boundaries(body: str) -> list[tuple[int, str, str]]:
+    """Apartados principales numerados: «1. INTRODUCCIÓN», «4. PARTE EMPÍRICA», etc."""
+    boundaries: list[tuple[int, str, str]] = []
+    for match in _NUMBERED_SECTION.finditer(body):
+        pos = match.start()
+        section_num = int(match.group(1))
+        if section_num > 12:
+            continue
+        title = _numbered_section_title(body, match)
+        if len(title) < 8 or not _SECTION_TITLE_HINT.search(title):
+            continue
+        if re.search(r"\.{3,}\s*\d+\s*$", title):
+            continue
+        if re.search(r"(?i)\(pag\.", title) and pos < len(body) * 0.12:
+            continue
+        if re.search(r"(?i)^ANEXO\b", title):
+            continue
+        role = classify_heading(title)
+        if role is None or role in {"presentacion", "objetivos"}:
+            continue
+        display = f"{match.group(1)}. {title}"
+        boundaries.append((pos, role, display))
+
+    boundaries.sort(key=lambda item: item[0])
+    seen_roles: set[str] = set()
+    unique: list[tuple[int, str, str]] = []
+    for pos, role, title in boundaries:
+        if role in seen_roles:
+            continue
+        seen_roles.add(role)
+        unique.append((pos, role, title))
+    return unique
+
+
 def _find_chapter_boundaries(body: str) -> list[tuple[int, str, str]]:
     """Localiza apartados principales en tesis organizadas por CAPÍTULO I: TÍTULO."""
     boundaries: list[tuple[int, str, str]] = []
@@ -844,6 +920,9 @@ def _find_major_section_boundaries(
         chapters = _find_chapter_boundaries(body)
         if len(chapters) >= 2:
             return chapters
+        numbered = _find_numbered_section_boundaries(body)
+        if len(numbered) >= 2:
+            return numbered
 
     return unique
 

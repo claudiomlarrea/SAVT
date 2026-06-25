@@ -79,6 +79,7 @@ def _count_citations(text: str) -> int:
 
     cites = count_numeric_citation_appearances(text)
     cites += len(re.findall(r"\([A-ZÁÉÍÓÚÑ][^)]*,\s*\d{4}", text))
+    cites += len(re.findall(r"\[[A-ZÁÉÍÓÚÑa-záéíóú][^\]]*,\s*\d{4}", text))
     return cites
 
 

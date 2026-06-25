@@ -11,6 +11,10 @@ APA_CITATION_PATTERN = re.compile(
     r"\(([^()]*?\d{4}[a-z]?[^()]*?)\)",
     re.IGNORECASE,
 )
+BRACKET_APA_CITATION_PATTERN = re.compile(
+    r"\[([^[\]]*?\d{4}[a-z]?[^[\]]*?)\]",
+    re.IGNORECASE,
+)
 # Bloque autor(es) hasta (AAAA) — tolera PDFs con entradas pegadas y apellidos compuestos.
 _NAME_PARTICLE = r"(?:van|von|de|del|da|di|du|der|den|la|le|y|e)"
 _APA_SURNAME = (
@@ -201,24 +205,36 @@ def apa_entry_key(entry: str) -> str:
 
 
 def detect_citation_style(body: str, bib_text: str) -> str:
-    numbered_entries = len(re.findall(r"(?m)^\d+\.\s*\S", bib_text))
-    apa_entries = len(_collect_apa_starts(bib_text)) if bib_text else 0
-    if apa_entries < 5:
-        apa_entries = len(APA_ENTRY_START.findall(bib_text)) + len(APA_ENTRY_FALLBACK.findall(bib_text))
-    apa_citations = sum(
-        1
-        for match in APA_CITATION_PATTERN.finditer(body)
-        if re.search(r"[A-Za-zÁÉÍÓÚáéíóúñ]{3}.*,\s*\d{4}", match.group(1))
-    )
-    numbered_citations = len(re.findall(r"\(\d+\)", body))
+    """Elige APA o Vancouver según qué parser recupere más referencias válidas."""
+    if not bib_text or not bib_text.strip():
+        return "apa"
 
-    if apa_entries >= 5 and apa_citations >= numbered_citations:
+    normalized = normalize_bibliography_text(bib_text)
+    apa_parsed = len(parse_apa_bibliography(normalized))
+    numbered_parsed = len(parse_bibliography(normalized))
+
+    if apa_parsed >= 5 and apa_parsed >= numbered_parsed:
         return "apa"
-    if numbered_entries >= 5:
+    if numbered_parsed >= 5 and numbered_parsed > apa_parsed:
         return "numbered"
-    if apa_citations > numbered_citations:
+
+    apa_hints = len(_collect_apa_starts(normalized))
+    if apa_hints < 5:
+        apa_hints = len(APA_ENTRY_START.findall(normalized)) + len(APA_ENTRY_FALLBACK.findall(normalized))
+    # Solo números bajos al inicio de línea (1.–200.); evita páginas/volúmenes en APA.
+    numbered_hints = len(
+        re.findall(r"(?m)^(?:[1-9]\d{0,2})\.\s+[A-Za-zÁÉÍÓÚ\"(]", normalized)
+    )
+
+    if apa_hints >= 10 and apa_hints >= numbered_hints:
         return "apa"
-    return "numbered"
+    if numbered_hints >= 5 and numbered_hints > apa_hints:
+        return "numbered"
+    if apa_hints >= 3:
+        return "apa"
+    if numbered_hints > 0:
+        return "numbered"
+    return "apa"
 
 
 def _strip_bibliography_heading(bib_text: str) -> str:
@@ -334,43 +350,25 @@ def extract_narrative_apa_keys(body: str, bibliography: dict[int, ReferenceEntry
 
 
 def count_references_in_text(parsed: dict, bibliography: dict[int, ReferenceEntry]) -> int:
-    """Fuentes distintas citadas en el cuerpo (parentéticas + narrativas APA, sin falsos positivos)."""
-    style = parsed.get("citation_style", "numeric")
-    if style == "apa":
-        bib_keys = {ref.key for ref in bibliography.values() if ref.key}
-        keys = set(parsed.get("cited_keys") or set())
-        keys |= extract_narrative_apa_keys(parsed.get("body", ""), bibliography)
-        cleaned: set[str] = set()
-        for key in keys:
-            in_bib = any(apa_keys_match(key, {bib_key}) for bib_key in bib_keys)
-            if is_institutional_citation_key(key) and not in_bib:
-                continue
-            if in_bib:
-                cleaned.add(key)
-                continue
-            author = key.split("|", 1)[0] if "|" in key else key
-            if len(author) >= 4:
-                cleaned.add(key)
-        return len(cleaned)
-    from savt.parser import extract_cited_numbers
-
-    max_ref = max(bibliography.keys(), default=500)
-    return len(extract_cited_numbers(parsed.get("body", ""), max_ref=max_ref))
+    """Referencias detectadas en el apartado bibliográfico (no se escanean citas en el cuerpo)."""
+    return len(bibliography)
 
 
 def extract_apa_citations(body: str) -> tuple[set[str], list[tuple[str, str]]]:
     cited_keys: set[str] = set()
     contexts: list[tuple[str, str]] = []
     paragraphs = [p.strip() for p in re.split(r"\n{2,}", body) if len(p.split()) > 8]
+    citation_patterns = (APA_CITATION_PATTERN, BRACKET_APA_CITATION_PATTERN)
     for paragraph in paragraphs:
         keys_in_paragraph: set[str] = set()
-        for match in APA_CITATION_PATTERN.finditer(paragraph):
-            inner = re.sub(r"\s+", " ", match.group(1)).strip()
-            if not re.search(r"[A-Za-zÁÉÍÓÚáéíóúñ]{3}.*,\s*\d{4}", inner):
-                continue
-            key = apa_citation_key(inner)
-            if key:
-                keys_in_paragraph.add(key)
+        for pattern in citation_patterns:
+            for match in pattern.finditer(paragraph):
+                inner = re.sub(r"\s+", " ", match.group(1)).strip()
+                if not re.search(r"[A-Za-zÁÉÍÓÚáéíóúñ]{3}.*,\s*\d{4}", inner):
+                    continue
+                key = apa_citation_key(inner)
+                if key:
+                    keys_in_paragraph.add(key)
         for key in keys_in_paragraph:
             cited_keys.add(key)
             contexts.append((key, paragraph))

@@ -19,13 +19,13 @@ def _read_bytes(source: BinaryIO | str) -> bytes:
     return source.read()
 
 
-def extract_text_from_pdf(source: BinaryIO | str) -> tuple[str, int]:
+def extract_text_from_pdf(source: BinaryIO | str) -> tuple[str, int, list[str]]:
     data = _read_bytes(source)
     document = fitz.open(stream=data, filetype="pdf")
     pages: list[str] = []
     for page in document:
         pages.append(page.get_text("text"))
-    return "\n".join(pages), document.page_count
+    return "\n".join(pages), document.page_count, pages
 
 
 def remove_pdf_toc_lines(text: str) -> str:
@@ -51,6 +51,7 @@ def remove_pdf_front_matter(body: str) -> str:
         r"1\.1\s+Presentaci[oó]n del tema\s*\n",
         r"1\.\s+Planteamiento general\s*\n",
         r"1\.\s+Introducci[oó]n\s*\n",
+        r"(?m)^\s*\d+\.?\s*INTRODUCCI[ÓO]N\s*$",
         r"(?m)^\s*INTRODUCCI[ÓO]N\s*$",
         r"(?m)^\s*\d+\.\s*INTRODUCCI[ÓO]N\s*$",
         r"Presentaci[oó]n del Trabajo(?: de Tesis| Final)?\s*\n",
@@ -69,7 +70,8 @@ def remove_pdf_front_matter(body: str) -> str:
     return body
 
 
-def prepare_pdf_text(source: BinaryIO | str) -> tuple[str, int]:
-    raw_text, page_count = extract_text_from_pdf(source)
-    cleaned = remove_pdf_toc_lines(raw_text)
-    return cleaned, page_count
+def prepare_pdf_text(source: BinaryIO | str) -> tuple[str, int, list[str]]:
+    raw_text, page_count, page_texts = extract_text_from_pdf(source)
+    cleaned_pages = [remove_pdf_toc_lines(page) for page in page_texts]
+    cleaned = "\n".join(cleaned_pages)
+    return cleaned, page_count, cleaned_pages
