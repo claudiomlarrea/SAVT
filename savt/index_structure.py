@@ -7,6 +7,8 @@ import re
 from savt.index_parser import (
     IndexEntry,
     bibliography_index_entry,
+    index_pages_are_unreliable,
+    is_capitulo_index_entries,
     parse_index_entries,
     top_level_index_entries,
 )
@@ -40,14 +42,27 @@ def char_offset_for_page(page: int, offsets: list[int], text_len: int) -> int:
     return min(int((page - 1) / 300 * text_len), text_len)
 
 
+def _flexible_phrase(words: str) -> str:
+    parts = words.split()
+    if not parts:
+        return ""
+    return r"\s+".join(re.escape(part) for part in parts)
+
+
 def _title_heading_patterns(entry: IndexEntry) -> list[re.Pattern[str]]:
     title = re.sub(r"\s+", " ", entry.title).strip()
     title_esc = re.escape(title)
     first_words = " ".join(title.split()[:4])
+    first_words_esc = re.escape(first_words)
+    first_words_flex = _flexible_phrase(first_words)
+    num = re.escape(entry.number)
     patterns = [
-        rf"(?im)^\s*{re.escape(entry.number)}\.\s*{title_esc}\s*$",
-        rf"(?im)^\s*{re.escape(entry.number)}\.\s*{title_esc}",
-        rf"(?im)^\s*{re.escape(entry.number)}\.\s+{re.escape(first_words)}",
+        rf"(?im)^\s*{num}\.\s*{title_esc}\s*$",
+        rf"(?im)^\s*{num}\.\s*{title_esc}",
+        rf"(?im)^\s*{num}\.\s+{first_words_esc}",
+        rf"(?im)^\s*cap[ií]tulo\s+{num}\s*[:.]\s*{title_esc}",
+        rf"(?im)^\s*cap[ií]tulo\s+{num}\s*[:.]\s+{first_words_esc}",
+        rf"(?is)cap[ií]tulo\s+{num}\s*[:.]\s+{first_words_flex}",
     ]
     if entry.is_bibliography:
         patterns.append(r"(?im)^\s*(?:\d+\.\s*)?BIBLIOGRAF[IÍA]\s*$")
@@ -101,7 +116,11 @@ def _boundaries_from_headings(
 
 
 def _use_heading_locator(entries: list[IndexEntry]) -> bool:
+    if is_capitulo_index_entries(entries):
+        return True
     if any(entry.page_is_roman for entry in entries):
+        return True
+    if index_pages_are_unreliable(entries):
         return True
     return any(entry.page_label and not str(entry.page).isdigit() for entry in entries)
 

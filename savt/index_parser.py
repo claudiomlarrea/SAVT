@@ -204,6 +204,202 @@ def _trim_block_to_index_heading(block: str) -> str:
     return block
 
 
+_INDEX_END_MARKERS = re.compile(
+    r"(?im)^(?:abreviaturas|glosario|anexos?|bibliograf|referencias)\s*$",
+)
+_INDEX_BODY_BLEED = re.compile(
+    r"(?im)^\d+\.\s+(?:importancia|estado actual|introducci[oó]n|la donaci[oó]n)\b",
+)
+def _trim_index_block_end(block: str) -> str:
+    """Corta el bloque cuando el índice termina (abreviaturas, cuerpo, etc.)."""
+    lines = block.splitlines()
+    kept: list[str] = []
+    saw_capitulo = False
+    for line in lines:
+        stripped = line.strip()
+        if not stripped:
+            if kept:
+                kept.append(line)
+            continue
+        if _INDEX_END_MARKERS.match(stripped):
+            break
+        if re.match(r"(?i)^cap[ií]tulo\s+\d", stripped):
+            saw_capitulo = True
+            kept.append(line)
+            continue
+        if saw_capitulo and _INDEX_BODY_BLEED.match(stripped):
+            break
+        if saw_capitulo and len(re.findall(r"\b[A-Z]{2,6}:", stripped)) >= 4:
+            break
+        kept.append(line)
+    return "\n".join(kept)
+
+
+def _merge_capitulo_lines(block: str) -> str:
+    """Une títulos de capítulo partidos en varias líneas del índice."""
+    lines = [line.strip() for line in block.splitlines()]
+    merged: list[str] = []
+    idx = 0
+    while idx < len(lines):
+        line = lines[idx]
+        if not line:
+            idx += 1
+            continue
+        if re.match(r"(?i)^cap[ií]tulo\s+\d", line):
+            while idx + 1 < len(lines):
+                nxt = lines[idx + 1].strip()
+                if not nxt:
+                    break
+                if re.match(r"(?i)^(cap[ií]tulo|secci[oó]n|\d+\.)\b", nxt):
+                    break
+                if re.search(r"(?:[.\u2026…]{2,})\s*\d{1,4}\s*$", line):
+                    break
+                line = f"{line} {nxt}"
+                idx += 1
+        merged.append(line)
+        idx += 1
+    return "\n".join(merged)
+
+
+def _parse_capitulo_title_and_page(rest: str) -> tuple[str, str]:
+    page_match = re.search(r"(?:[.\u2026…]{2,})\s*(\d{1,4})\s*$", rest.strip())
+    page_token = page_match.group(1) if page_match else ""
+    if page_match:
+        title = rest[: page_match.start()].strip().rstrip(".")
+    else:
+        title = rest.strip().rstrip(".")
+    return title, page_token
+
+
+def _capitulo_entry_from_parts(number: str, rest: str) -> IndexEntry | None:
+    title, page_token = _parse_capitulo_title_and_page(rest)
+    if len(title) < 8 or _is_low_quality_index_title(title):
+        return None
+    if page_token:
+        return _entry_from_match(number, title, page_token)
+    return IndexEntry(
+        number=number,
+        title=title,
+        page=int(number),
+        role=classify_heading(title),
+        page_label="",
+        page_is_roman=False,
+    )
+
+
+def _scan_capitulo_entries(text: str) -> dict[str, IndexEntry]:
+    """Recorre el texto buscando líneas CAPÍTULO N: (índice de artículos compilados)."""
+    best: dict[str, IndexEntry] = {}
+    lines = text.splitlines()
+    idx = 0
+    while idx < len(lines):
+        line = lines[idx].strip()
+        match = re.match(r"(?i)^cap[ií]tulo\s+(\d{1,2})\s*[:.]\s*(.*)$", line)
+        if not match:
+            idx += 1
+            continue
+        number = match.group(1)
+        rest = match.group(2).strip()
+        while idx + 1 < len(lines):
+            nxt = lines[idx + 1].strip()
+            if not nxt:
+                idx += 1
+                continue
+            if re.match(r"(?i)^cap[ií]tulo\s+\d", nxt):
+                break
+            if re.search(r"(?:[.\u2026…]{2,})\s*\d{1,4}\s*$", rest):
+                break
+            if re.match(r"^\d+\.\s+", nxt) and len(rest) > 15:
+                break
+            rest = f"{rest} {nxt}"
+            idx += 1
+        entry = _capitulo_entry_from_parts(number, rest)
+        if entry:
+            prev = best.get(number)
+            if prev is None:
+                best[number] = entry
+            elif entry.page_label and not prev.page_label:
+                best[number] = entry
+            elif entry.page_label and prev.page_label and entry.page >= prev.page:
+                best[number] = entry
+            elif not entry.page_label and prev.page_label:
+                pass
+            elif len(entry.title) > len(prev.title):
+                best[number] = entry
+        idx += 1
+    return best
+
+
+def _extract_capitulo_index_entries(block: str, full_text: str) -> list[IndexEntry]:
+    """Índices con estructura CAPÍTULO N: título (tesis compiladas)."""
+    best: dict[str, IndexEntry] = {}
+
+    for source in (_merge_capitulo_lines(_trim_index_block_end(block)), full_text):
+        for number, entry in _scan_capitulo_entries(source).items():
+            prev = best.get(number)
+            if prev is None:
+                best[number] = entry
+                continue
+            prev_has_page = bool(prev.page_label)
+            entry_has_page = bool(entry.page_label)
+            if entry_has_page and not prev_has_page:
+                best[number] = entry
+            elif entry_has_page == prev_has_page and len(entry.title) > len(prev.title):
+                best[number] = entry
+
+    if len(best) < 3:
+        return []
+
+    numbers = sorted(int(key) for key in best)
+    if numbers[-1] - numbers[0] + 1 > len(numbers) + 2:
+        return []
+
+    return [best[str(num)] for num in numbers]
+
+
+def is_capitulo_index_entries(entries: list[IndexEntry]) -> bool:
+    """Tesis por compilación: apartados CAPÍTULO 1…N con páginas altas en el índice."""
+    top = top_level_index_entries(entries)
+    if len(top) < 3:
+        return False
+    numbers = sorted(int(entry.number) for entry in top if entry.number.isdigit())
+    if not numbers or numbers[0] != 1:
+        return False
+    if numbers != list(range(1, len(numbers) + 1)):
+        return False
+    return all(entry.page >= 40 for entry in top[: min(3, len(top))])
+
+
+def index_pages_are_unreliable(entries: list[IndexEntry]) -> bool:
+    """Detecta páginas de índice incoherentes (p. ej. saltos 1 → 60 → 3)."""
+    top = top_level_index_entries(entries)
+    if len(top) < 2:
+        return False
+    pages = [entry.page for entry in top]
+    if pages != sorted(pages):
+        return True
+    if max(pages) > 30 and min(pages) <= 15:
+        jumps = [b - a for a, b in zip(pages, pages[1:]) if b - a > 20]
+        if jumps:
+            return True
+    return False
+
+
+def _is_low_quality_index_title(title: str) -> bool:
+    title = title.strip()
+    if title.startswith(":"):
+        return True
+    if re.search(r"(?i)\bcap[ií]tulo\s+\d", title) and not re.match(r"(?i)^cap[ií]tulo", title):
+        return True
+    if len(title) < 8:
+        return True
+    return False
+
+
+def _is_low_quality_index_entry(entry: IndexEntry) -> bool:
+    return _is_low_quality_index_title(entry.title)
+
+
 def _sequence_coherence_score(numbers: list[int]) -> int:
     """Premia 1,2,3… o subsecuencias crecientes sin saltos grandes."""
     if not numbers:
@@ -425,6 +621,7 @@ def _index_block(full_text: str, *, diagnose: bool = False) -> str:
         prepared = _normalize_index_lines(winner_raw)
 
     prepared = _trim_block_to_index_heading(prepared)
+    prepared = _trim_index_block_end(prepared)
     return _strip_subsections(_fix_orphan_index_titles(prepared))
 
 
@@ -630,7 +827,7 @@ def _parse_index_entries_from_block(block: str, *, tolerant: bool = False) -> li
         if not normalized_number:
             return False
         title = re.sub(r"\s+", " ", title).strip().rstrip(".")
-        if len(title) < 3:
+        if len(title) < 3 or _is_low_quality_index_title(title):
             return False
         key = (normalized_number, title[:40].upper())
         if key in seen:
@@ -696,6 +893,17 @@ def parse_index_entries(full_text: str) -> list[IndexEntry]:
     if not block:
         _INDEX_PARSE_DIAGNOSTIC = None
         return []
+
+    capitulo_entries = _extract_capitulo_index_entries(block, full_text)
+    if len(capitulo_entries) >= 3:
+        _INDEX_PARSE_DIAGNOSTIC = {
+            "mode": "capitulos",
+            "strict_top_level": len(capitulo_entries),
+            "tolerant_top_level": None,
+            "strict_coherence": _entries_coherence_score(capitulo_entries),
+            "tolerant_coherence": None,
+        }
+        return capitulo_entries
 
     strict_entries = _parse_index_entries_from_block(block, tolerant=False)
     strict_top = len(top_level_index_entries(strict_entries))
