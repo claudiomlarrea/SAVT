@@ -56,6 +56,103 @@ PUBLICATION_MARKERS = [
     "revista indexada",
 ]
 
+ORIGINALITY_LEVEL_LABELS = {
+    "basic": "de grado o tesina",
+    "standard": "de posgrado",
+    "strict": "de doctorado",
+}
+
+ORIGINALITY_LEVEL_DISPLAY = {
+    "basic": "Grado / tesina",
+    "standard": "Posgrado",
+    "strict": "Doctorado",
+}
+
+
+def _trim_to_word_count(text: str, target: int = 70) -> str:
+    words = re.findall(r"\S+", text.strip())
+    if len(words) <= target + 2:
+        return text.strip()
+    chunk = " ".join(words[:target]).rstrip(".,;:")
+    return f"{chunk}."
+
+
+def _short_topic(document_title: str) -> str:
+    title = re.sub(r"\s+", " ", (document_title or "").strip())
+    if not title:
+        return "el tema investigado"
+    words = title.split()
+    if len(words) > 12:
+        return "«" + " ".join(words[:12]) + "…»"
+    return f"«{title}»"
+
+
+def build_originality_qualitative_paragraph(
+    parsed: dict,
+    dashboard: dict,
+    *,
+    profile_label: str = "",
+) -> str:
+    """Síntesis cualitativa (~70 palabras) sobre aporte y originalidad textual."""
+    topic = _short_topic(parsed.get("document_title", ""))
+    level = dashboard.get("level", "standard")
+    level_phrase = ORIGINALITY_LEVEL_LABELS.get(level, "académico")
+    profile_hint = f" ({profile_label})" if profile_label else ""
+
+    contribution = int(dashboard.get("contribution_markers", 0))
+    own_data = int(dashboard.get("own_data_markers", 0))
+    publications = int(dashboard.get("publication_markers", 0))
+    proxy = int(dashboard.get("score_proxy", 0))
+
+    if contribution >= 2 and own_data >= 1:
+        body = (
+            f"La tesis sobre {topic} articula con relativa claridad su aporte en conclusiones "
+            f"y alude a hallazgos o datos del estudio. Para un trabajo {level_phrase}{profile_hint}, "
+            f"la explicitación de implicaciones resulta adecuada en términos formales, si bien el "
+            f"jurado deberá contrastar novedad y relevancia disciplinar. "
+        )
+    elif contribution >= 1 or own_data >= 1 or proxy >= 35:
+        body = (
+            f"El trabajo vinculado a {topic} sugiere un aporte parcial: aparecen formulaciones de "
+            f"contribución o de resultados propios, pero el cierre podría profundizar implicaciones "
+            f"teóricas, prácticas y líneas futuras. Para un nivel {level_phrase}{profile_hint}, "
+            f"conviene reforzar el argumento de originalidad antes de la defensa. "
+        )
+    else:
+        body = (
+            f"Respecto de {topic}, el documento exhibe escasos indicadores textuales de aporte "
+            f"explícito o de hallazgos propios en las secciones analizadas. Las conclusiones no "
+            f"desarrollan con suficiencia implicancias ni recomendaciones diferenciadas. Para un "
+            f"nivel {level_phrase}{profile_hint}, el jurado deberá examinar con atención la novedad. "
+        )
+
+    if publications >= 1:
+        body += (
+            "Se detectan menciones compatibles con producción científica previa del autor. "
+        )
+
+    body += (
+        "Esta lectura es heurística y no sustituye informes de similitud ni el criterio del jurado."
+    )
+    return _trim_to_word_count(body, 70)
+
+
+def _finalize_originality_dashboard(
+    parsed: dict,
+    dashboard: dict,
+    *,
+    profile_label: str,
+) -> None:
+    dashboard["level_label"] = ORIGINALITY_LEVEL_DISPLAY.get(
+        dashboard.get("level", ""),
+        dashboard.get("level", "—"),
+    )
+    dashboard["qualitative_summary"] = build_originality_qualitative_paragraph(
+        parsed,
+        dashboard,
+        profile_label=profile_label,
+    )
+
 
 def audit_originality(parsed: dict, config: AuditConfig) -> tuple[list[Finding], dict]:
     findings: list[Finding] = []
@@ -100,6 +197,9 @@ def audit_originality(parsed: dict, config: AuditConfig) -> tuple[list[Finding],
     }
 
     if not config.check_originality:
+        _finalize_originality_dashboard(
+            parsed, dashboard, profile_label=config.profile.label
+        )
         return findings, dashboard
 
     proxy = 0
@@ -155,6 +255,9 @@ def audit_originality(parsed: dict, config: AuditConfig) -> tuple[list[Finding],
                     detail="Se identificó desarrollo conclusivo aunque el aporte podría explicitarse más.",
                 )
             )
+        _finalize_originality_dashboard(
+            parsed, dashboard, profile_label=config.profile.label
+        )
         return findings, dashboard
 
     if level in ("standard", "strict"):
@@ -223,4 +326,5 @@ def audit_originality(parsed: dict, config: AuditConfig) -> tuple[list[Finding],
                 )
             )
 
+    _finalize_originality_dashboard(parsed, dashboard, profile_label=config.profile.label)
     return findings, dashboard

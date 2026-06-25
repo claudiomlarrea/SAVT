@@ -598,9 +598,13 @@ def render_originality(dashboard: dict) -> None:
     st.caption(
         "Indicadores heurísticos — no sustituyen evaluación de originalidad por el jurado."
     )
-    level = orig.get("level", "—")
-    if level and level != "—":
-        st.markdown(f"**Nivel exigido:** {level}")
+    level_label = orig.get("level_label") or orig.get("level", "—")
+    if level_label and level_label != "—":
+        st.markdown(f"**Nivel exigido:** {level_label}")
+    summary = orig.get("qualitative_summary", "").strip()
+    if summary:
+        st.markdown("**Análisis cualitativo**")
+        st.write(summary)
 
 
 def render_findings_table(report) -> None:
