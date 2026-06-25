@@ -78,12 +78,12 @@ def run_document_pipeline(
     bib_index = bibliography_index_entry(index_entries)
 
     if index_entries:
-        bib_page = f", bibliografía pág. {bib_index.page}" if bib_index else ""
+        bib_hint = " con apartado bibliográfico" if bib_index else ""
         step1 = _step(
             "index",
             "1. Índice → apartados y páginas",
             "ok" if top_entries or bib_index else "warning",
-            f"{len(index_entries)} entradas en índice · {len(top_entries)} apartados principales{bib_page}",
+            f"Índice detectado{bib_hint}",
             entries=[
                 {"number": e.number, "title": e.title, "page": e.page}
                 for e in top_entries
@@ -124,10 +124,7 @@ def run_document_pipeline(
                 body = split_body
                 bib_text = split_bib
         step2_status = "ok"
-        step2_summary = (
-            f"{len(index_sections)} apartados con palabras y porcentaje "
-            f"({sum(s.get('words', 0) for s in index_sections):,} palabras en cuerpo)"
-        )
+        step2_summary = "Apartados del índice aplicados al documento"
     else:
         from savt.parser import remove_index_duplicate, split_body_and_bibliography
         from savt.pdf_parser import remove_pdf_front_matter
@@ -140,10 +137,7 @@ def run_document_pipeline(
         structure_source = "headings"
         body_words_preview = count_words(body)
         step2_status = "warning" if body_words_preview > 8000 and len(section_map) <= 1 else "ok"
-        step2_summary = (
-            f"Apartados por encabezados ({len(section_map)} bloques, "
-            f"{body_words_preview:,} palabras en cuerpo)"
-        )
+        step2_summary = "Apartados detectados por encabezados del documento"
 
     steps.append(
         _step(
@@ -180,7 +174,7 @@ def run_document_pipeline(
             "bibliography",
             "3. Apartado bibliográfico",
             step3_status,
-            f"{bib_words:,} palabras detectadas",
+            f"Apartado bibliográfico detectado",
             style=citation_style,
             references=len(bibliography),
             words=bib_words,

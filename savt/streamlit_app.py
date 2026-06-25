@@ -129,34 +129,12 @@ def render_sidebar(report=None) -> "AuditConfig":
     check_content = st.sidebar.checkbox("Profundidad académica", value=True)
 
     if report:
-        from savt.ui_labels import citation_style_label
-
-        bib_dash = (report.metadata.get("dashboard") or {}).get("bibliography_dashboard") or {}
-        refs_used = bib_dash.get("citations_found")
         with st.sidebar.expander("Datos técnicos del documento", expanded=False):
             st.write(f"Perfil: {report.metadata.get('profile_label', '—')}")
-            st.write(f"Palabras (cuerpo): {report.word_count:,}")
-            if refs_used is not None:
-                st.write(f"Referencias totales utilizadas: {refs_used}")
-            st.write(f"Estilo: {citation_style_label(report.metadata.get('citation_style'))}")
-            if report.metadata.get("file_type") == "pdf":
-                st.write(f"Páginas PDF: {report.metadata.get('pdf_page_count', '—')}")
-            else:
-                st.write(f"Páginas est.: {report.page_estimate}")
             if report.page_estimate < min_pages or report.page_estimate > max_pages:
                 st.warning(f"Extensión fuera del rango {min_pages}–{max_pages} páginas.")
 
     st.sidebar.markdown("---")
-    usage_count = st.session_state.get("usage_count")
-    if usage_count is None:
-        try:
-            from savt.usage_counter import get_usage_count
-
-            usage_count = get_usage_count()
-        except Exception:
-            usage_count = None
-    if usage_count is not None:
-        st.sidebar.caption(f"Auditorías realizadas: {usage_count:,}")
     st.sidebar.caption(f"Versión {__version__} · Python {sys.version.split()[0]}")
 
     return AuditConfig(
@@ -211,11 +189,21 @@ def render_technical_section_detail(dashboard: dict) -> None:
 
     with st.expander("Detalle técnico: métricas por apartado", expanded=False):
         st.caption(
-            "Vista analítica para revisión avanzada. «Apariciones cita» cuenta cada grupo "
-            "(1), (2,3) en el apartado; «N° refs distintos» son referencias únicas citadas ahí."
+            "Vista analítica para revisión avanzada (sin recuentos numéricos)."
         )
         if section_audits:
-            st.dataframe(section_audit_summary_rows(section_audits), hide_index=True)
+            rows = section_audit_summary_rows(section_audits)
+            display = [
+                {
+                    "Apartado": row.get("Apartado", ""),
+                    "Detectado como": row.get("Detectado como", ""),
+                    "Estado": row.get("Estado", "—"),
+                    "Profundidad": row.get("Profundidad", "—"),
+                    "Observaciones": row.get("Observaciones", ""),
+                }
+                for row in rows
+            ]
+            st.dataframe(display, hide_index=True)
 
 
 def render_verdict(dashboard: dict) -> None:
@@ -380,25 +368,21 @@ def render_bibliography(dashboard: dict) -> None:
     details = bib.get("details") or {}
     st.markdown("## Bibliografía y citación")
 
-    unmatched = bib.get("unmatched_citations", 0)
     coverage_ok = bib["coverage"] == "adecuada"
     coverage_partial = bib["coverage"] not in ("adecuada", "—")
 
     summary_lines = [
-        f"{conformance_badge(bib.get('style_ok', True))} — Estilo {bib['style']} detectado",
-        (
-            f"{conformance_badge(bib.get('citations_found', 0) > 0)} — "
-            f"{bib.get('citations_found', 0)} referencias totales utilizadas"
-        ),
+        f"{conformance_badge(bib.get('style_ok', True))} — Estilo de citación conforme"
+        if bib.get("style_ok", True)
+        else f"{conformance_badge(False)} — Estilo de citación a revisar",
     ]
     if bib["out_of_period"]:
         summary_lines.append(
-            f"{conformance_badge(False, True)} — {bib['out_of_period']} referencias fuera del período metodológico"
+            f"{conformance_badge(False, True)} — Referencias fuera del período metodológico"
         )
     if bib["possibly_off_topic"]:
         summary_lines.append(
-            f"{conformance_badge(False, True)} — "
-            f"{bib['possibly_off_topic']} referencias podrían no estar relacionadas con el tema"
+            f"{conformance_badge(False, True)} — Referencias posiblemente ajenas al tema"
         )
     summary_lines.append(
         f"{conformance_badge(coverage_ok, coverage_partial)} — "
@@ -409,7 +393,7 @@ def render_bibliography(dashboard: dict) -> None:
 
     unmatched = details.get("unmatched_apa") or []
     if unmatched:
-        with st.expander(f"Citas no emparejadas ({len(unmatched)})", expanded=True):
+        with st.expander("Citas no emparejadas", expanded=True):
             for entry in unmatched:
                 cites = ", ".join(entry["citations_in_text"])
                 st.markdown(f"- **En el texto:** {cites}")
@@ -418,13 +402,13 @@ def render_bibliography(dashboard: dict) -> None:
     out_of_period = details.get("out_of_period") or []
     if out_of_period:
         period = out_of_period[0].get("period_declared", "")
-        with st.expander(f"Referencias anteriores al período {period} ({len(out_of_period)})", expanded=False):
+        with st.expander(f"Referencias anteriores al período {period}", expanded=False):
             for entry in out_of_period[:20]:
                 st.markdown(f"- **Ref. {entry['number']} ({entry['year']}):** {entry['summary']}")
 
     off_topic = details.get("off_topic") or []
     if off_topic:
-        with st.expander(f"Referencias posiblemente ajenas al tema ({len(off_topic)})", expanded=False):
+        with st.expander("Referencias posiblemente ajenas al tema", expanded=False):
             for entry in off_topic[:20]:
                 st.markdown(f"- **Ref. {entry['number']}:** {entry['summary']}")
                 st.caption(entry.get("reason", ""))
@@ -436,10 +420,7 @@ def render_bibliography(dashboard: dict) -> None:
     doi_help = details.get("doi_help") or {}
 
     if doi_invalid or doi_not_resolved:
-        with st.expander(
-            f"DOI inválidos ({len(doi_invalid)}) / no resueltos ({len(doi_not_resolved)})",
-            expanded=True,
-        ):
+        with st.expander("DOI inválidos / no resueltos", expanded=True):
             st.markdown(doi_help.get("invalid", ""))
             for entry in doi_invalid:
                 st.markdown(f"- **Ref. {entry['number']}:** [{entry['doi_url']}]({entry['doi_url']})")
@@ -450,7 +431,7 @@ def render_bibliography(dashboard: dict) -> None:
                 st.caption(f"{entry['message']} — {entry['summary'][:100]}…")
 
     if doi_year:
-        with st.expander(f"Año distinto al registrado en Crossref ({len(doi_year)})", expanded=False):
+        with st.expander("Año distinto al registrado en Crossref", expanded=False):
             st.markdown(doi_help.get("year_mismatch", ""))
             for entry in doi_year:
                 st.markdown(
@@ -461,7 +442,7 @@ def render_bibliography(dashboard: dict) -> None:
                 st.caption(entry["summary"])
 
     if doi_network:
-        with st.expander(f"DOI no verificados por red ({len(doi_network)})", expanded=False):
+        with st.expander("DOI no verificados por red", expanded=False):
             st.markdown(doi_help.get("network", ""))
             for entry in doi_network:
                 st.markdown(f"- **Ref. {entry['number']}:** [{entry['doi_url']}]({entry['doi_url']})")
@@ -529,14 +510,10 @@ def render_formal(dashboard: dict) -> None:
 
     abstract_words = formal.get("abstract_words", 0)
     if abstract_words:
-        st.markdown(f"**Resumen:** ~{abstract_words} palabras")
         preview = formal.get("abstract_text_preview", "")
         if preview:
+            st.markdown("**Resumen:**")
             st.caption(preview + "…")
-
-    ref_count = formal.get("reference_count")
-    if ref_count is not None:
-        st.markdown(f"**Referencias detectadas:** {ref_count}")
 
 
 def render_integrity(dashboard: dict) -> None:
@@ -601,7 +578,6 @@ def render_pipeline_steps(pipeline: list[dict], structure_source: str | None = N
 
 
 def render_document_data(dashboard: dict, report) -> None:
-    content = dashboard.get("content_dashboard") or {}
     formal = dashboard.get("formal_dashboard") or {}
     st.markdown("## Datos del documento")
     st.caption(f"Perfil: {dashboard.get('profile_label', '—')}")
@@ -610,17 +586,6 @@ def render_document_data(dashboard: dict, report) -> None:
         dashboard.get("pipeline") or report.metadata.get("pipeline") or [],
         dashboard.get("structure_source") or report.metadata.get("structure_source"),
     )
-
-    pages = report.metadata.get("pdf_page_count") or report.page_estimate
-
-    row = st.columns(2)
-    with row[0]:
-        st.metric("Palabras (cuerpo)", f"{report.word_count:,}")
-    with row[1]:
-        st.metric("Páginas", pages)
-
-    if content.get("bibliography_words"):
-        st.caption(f"Bibliografía: {content['bibliography_words']:,} palabras.")
 
     if formal:
         with st.expander("Normativa formal detectada", expanded=False):
@@ -635,20 +600,9 @@ def render_originality(dashboard: dict) -> None:
     st.caption(
         "Indicadores heurísticos — no sustituyen evaluación de originalidad por el jurado."
     )
-    help_text = orig.get("indicator_help") or {}
-    cols = st.columns(4)
-    with cols[0]:
-        st.metric("Índice proxy", f"{orig.get('score_proxy', 0)}/100")
-        st.caption(help_text.get("score_proxy", ""))
-    with cols[1]:
-        st.metric("Marcadores de aporte", orig.get("contribution_markers", 0))
-        st.caption(help_text.get("contribution_markers", ""))
-    with cols[2]:
-        st.metric("Datos propios", orig.get("own_data_markers", 0))
-        st.caption(help_text.get("own_data_markers", ""))
-    with cols[3]:
-        st.metric("Nivel exigido", orig.get("level", "—"))
-        st.caption(help_text.get("level", ""))
+    level = orig.get("level", "—")
+    if level and level != "—":
+        st.markdown(f"**Nivel exigido:** {level}")
 
 
 def render_findings_table(report) -> None:
@@ -709,7 +663,6 @@ def render_final_report(report, dashboard: dict, base_name: str) -> None:
         "Descargue el informe completo en Excel o Word, o explore el detalle tabular de hallazgos."
     )
     render_findings_table(report)
-    render_bibliography_table(report)
 
     col_csv, col_xlsx, col_docx = st.columns(3)
     csv = pd.DataFrame(findings_dataframe_rows(report)).to_csv(index=False).encode("utf-8")
@@ -755,9 +708,8 @@ def render_critical_findings(dashboard: dict) -> None:
     )
 
     if bib_count:
-        label = "crítico" if bib_count == 1 else "críticos"
         st.info(
-            f"Se detectaron **{bib_count}** problema(s) bibliográfico(s) {label}. "
+            "Hay problemas bibliográficos pendientes. "
             "Ver detalle en la sección **Bibliografía y citación**."
         )
 
@@ -776,7 +728,7 @@ def render_critical_findings(dashboard: dict) -> None:
 
     if suppressed:
         st.caption(
-            f"{suppressed} hallazgo(s) omitido(s) aquí porque ya están explicados en "
+            "Algunos hallazgos omitidos aquí porque ya están explicados en "
             "«Apartados con observaciones»."
         )
 
@@ -784,37 +736,6 @@ def render_critical_findings(dashboard: dict) -> None:
 def render_hallazgos(dashboard: dict) -> None:
     """Compatibilidad: delega en hallazgos críticos."""
     render_critical_findings(dashboard)
-
-
-def render_bibliography_table(report) -> None:
-    import pandas as pd
-
-    with st.expander("Listado completo de referencias detectadas", expanded=False):
-        st.caption(
-            "Cada fila es una referencia que el sistema extrajo de la bibliografía de su tesis: "
-            "si está citada en el texto, año, DOI y texto de la entrada."
-        )
-        if not report.bibliography:
-            st.warning("No se detectaron referencias.")
-            return
-        rows = []
-        style = report.metadata.get("citation_style", "numbered")
-        for num in sorted(report.bibliography):
-            ref = report.bibliography[num]
-            if style == "apa":
-                cited = "Sí" if ref.key in report.cited_keys else "Parcial/No"
-            else:
-                cited = "Sí" if num in report.cited_numbers else "No"
-            rows.append(
-                {
-                    "N°": num,
-                    "Citada": cited,
-                    "Año": ref.year,
-                    "DOI": ref.doi,
-                    "Referencia": ref.raw[:220] + ("…" if len(ref.raw) > 220 else ""),
-                }
-            )
-        st.dataframe(pd.DataFrame(rows), hide_index=True)
 
 
 def run_app() -> None:
