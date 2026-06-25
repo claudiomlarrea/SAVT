@@ -595,10 +595,16 @@ def parse_thesis_file(source: BinaryIO | str, filename: str = "tesis.docx") -> d
     lower_name = filename.lower()
 
     if lower_name.endswith(".pdf"):
+        from savt.pdf_extraction_normalizer import normalize_pdf_extraction
+
         _full_raw, pdf_page_count, page_texts = prepare_pdf_text(source)
-        norm_pages = [normalize_full_document_text(page) for page in page_texts]
+        pdf_extraction = normalize_pdf_extraction(page_texts)
+        norm_pages = [
+            normalize_full_document_text(page) for page in pdf_extraction["normalized_pages"]
+        ]
         full_text = "\n".join(norm_pages)
     else:
+        pdf_extraction = None
         full_text = normalize_full_document_text(extract_text_from_docx(source))
 
     pipeline = run_document_pipeline(
@@ -658,4 +664,12 @@ def parse_thesis_file(source: BinaryIO | str, filename: str = "tesis.docx") -> d
         "page_estimate": page_estimate,
         "page_estimate_body_only": page_estimate_body_only,
         "pdf_page_count": pdf_page_count,
+        "pdf_extraction": (
+            {
+                "original_text": pdf_extraction["original_text"],
+                "normalized_text": pdf_extraction["normalized_text"],
+            }
+            if pdf_extraction
+            else None
+        ),
     }
