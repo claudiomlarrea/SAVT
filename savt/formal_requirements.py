@@ -134,7 +134,7 @@ def audit_formal_requirements(parsed: dict, profile: InstitutionalProfile) -> tu
 
     ref_count = len(parsed.get("bibliography") or {})
     checks["reference_count"] = ref_count
-    if ref_count < profile.min_references:
+    if 0 < ref_count < profile.min_references:
         findings.append(
             Finding(
                 module="Normativa",

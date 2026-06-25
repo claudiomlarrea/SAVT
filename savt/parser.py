@@ -40,6 +40,10 @@ REFERENCIAS_BIBLIOGRAFICAS_HEADING = re.compile(
     r"(?m)^\s*REFERENCIAS\s+BIBLIOGRAF[IÍÁ][A-Z]*\s*$",
     re.IGNORECASE,
 )
+BIB_HEADING_INLINE = re.compile(
+    r"(?m)^\s*(?:\d+\.?\s*)?BIBLIOGRAF[IÍÁ][A-Z]*\s+(?=[A-ZÁÉÍÓÚ\"(])",
+    re.IGNORECASE,
+)
 BIB_SUBSECTION = re.compile(
     r"(?i)LEGISLATIVA|JURISPRUDENC|NORMATIVA|CONSULTADA|BIBLIOGRAF[IÍ]AS\s+WEB|FUENTES\s+CONSULTADAS"
 )
@@ -127,6 +131,7 @@ def _bibliography_start_positions(full_text: str) -> list[int]:
         BIB_HEADING_NUMBERED,
         BIB_HEADING,
         BIB_HEADING_LINE,
+        BIB_HEADING_INLINE,
         REFERENCIAS_HEADING,
         REFERENCIAS_BIBLIOGRAFICAS_HEADING,
     ):
@@ -188,13 +193,25 @@ def split_body_and_bibliography(full_text: str) -> tuple[str, str]:
         idx = max(top)
         body = full_text[:idx].strip()
         bib = full_text[idx:].strip()
-        bib = re.sub(
-            r"^(?:\d+\.?\s*)?(?:REFERENCIAS\s+)?BIBLIOGRAF[IÍÁ][A-Z]*\s*|^REFERENCIAS\s+BIBLIOGRAF[IÍÁ][A-Z]*\s*",
-            "BIBLIOGRAFÍA\n",
+        if re.match(
+            r"(?i)^(?:\d+\.?\s*)?(?:REFERENCIAS\s+)?BIBLIOGRAF[IÍÁ][A-Z]*\s+[A-ZÁÉÍÓÚ\"(]",
             bib,
-            count=1,
-            flags=re.IGNORECASE,
-        )
+        ):
+            bib = re.sub(
+                r"^(?:\d+\.?\s*)?(?:REFERENCIAS\s+)?BIBLIOGRAF[IÍÁ][A-Z]*\s+",
+                "BIBLIOGRAFÍA\n",
+                bib,
+                count=1,
+                flags=re.IGNORECASE,
+            )
+        else:
+            bib = re.sub(
+                r"^(?:\d+\.?\s*)?(?:REFERENCIAS\s+)?BIBLIOGRAF[IÍÁ][A-Z]*\s*|^REFERENCIAS\s+BIBLIOGRAF[IÍÁ][A-Z]*\s*",
+                "BIBLIOGRAFÍA\n",
+                bib,
+                count=1,
+                flags=re.IGNORECASE,
+            )
         bib = re.sub(r"^REFERENCIAS\s*$", "REFERENCIAS\n", bib, flags=re.IGNORECASE)
         return body, bib
     return full_text, ""

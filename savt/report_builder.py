@@ -100,6 +100,8 @@ BIBLIOGRAPHY_ISSUE_HINTS = (
     "Posible desajuste cita",
     "Numeración bibliográfica",
     "Muchas referencias APA no detectadas",
+    "Bibliografía por debajo del mínimo",
+    "No se detectó bibliografía",
 )
 
 # Hallazgos ya desarrollados en «Apartados con observaciones» — no repetir en críticos.

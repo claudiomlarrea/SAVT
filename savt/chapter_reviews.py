@@ -354,10 +354,26 @@ def build_discussion_review(block: dict) -> dict:
 
 def build_bibliography_review(bib_dashboard: dict, warnings_list: list[dict]) -> dict:
     details = bib_dashboard.get("details") or {}
+    total_refs = bib_dashboard.get("total_refs", 0)
     unmatched = bib_dashboard.get("unmatched_citations", 0)
     out_period = bib_dashboard.get("out_of_period", 0)
     off_topic = bib_dashboard.get("possibly_off_topic", 0)
     coverage = bib_dashboard.get("coverage", "adecuada")
+
+    if total_refs == 0:
+        return {
+            "key": "bibliografia",
+            "title": SECTION_TITLES["bibliografia"],
+            "status": "fail",
+            "ok": False,
+            "partial": False,
+            "summary": "No se detectó un apartado bibliográfico parseable con referencias.",
+            "why": "Sin referencias identificables no es posible verificar citas ni cobertura.",
+            "how_to_fix": (
+                "Incluya una sección final titulada BIBLIOGRAFÍA, con una referencia por línea o bloque APA."
+            ),
+            "issues": ["bibliografía no detectada o no parseable"],
+        }
 
     issues: list[str] = []
     if unmatched:

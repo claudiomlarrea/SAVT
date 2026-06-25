@@ -354,7 +354,9 @@ def build_bibliography_details(
     unmatched_count = len(unmatched_apa) if style == "apa" else 0
 
     coverage = "adecuada"
-    if unmatched_count > 5 or invalid or not_resolved:
+    if len(bibliography) == 0:
+        coverage = "requiere revisión"
+    elif unmatched_count > 5 or invalid or not_resolved:
         coverage = "requiere revisión"
     elif unmatched_count or out_of_period or year_mismatch:
         coverage = "aceptable con observaciones"
