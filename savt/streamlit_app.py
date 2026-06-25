@@ -638,58 +638,6 @@ def render_document_data(dashboard: dict, report) -> None:
             render_formal(dashboard)
 
 
-def render_academic_depth(dashboard: dict) -> None:
-    content = dashboard.get("content_dashboard") or {}
-    if not content:
-        return
-    st.markdown("## Profundidad académica")
-    help_text = content.get("indicator_help") or {}
-    st.caption(
-        "Indicadores cuantitativos por apartado (extensión, apariciones de cita, marcadores). "
-        "«Apariciones cita» no es el total de referencias únicas del documento. "
-        "El estado conforme figura en el checklist y en «Apartados con observaciones»."
-    )
-
-    section_depth = content.get("section_depth") or []
-    if section_depth:
-        rows = []
-        for item in section_depth:
-            if item.get("depth_status") == "missing" and item.get("words", 0) <= 0:
-                continue
-            result_markers = item.get("result_markers", 0)
-            rows.append(
-                {
-                    "Apartado": item.get("title", "—"),
-                    "Palabras": item.get("words", 0),
-                    "Apariciones cita": item.get("citation_count", 0),
-                    "Marcadores críticos": item.get("critical_markers", 0),
-                    "Ind. hallazgos": result_markers if result_markers else "—",
-                    "Índice profundidad": item.get("depth_label", "—"),
-                }
-            )
-        st.dataframe(rows, hide_index=True)
-
-    st.markdown("**Indicadores transversales**")
-    if content.get("hypothesis_detected"):
-        st.markdown(
-            f"{conformance_badge(True)} — Hipótesis detectada",
-            unsafe_allow_html=True,
-        )
-    results = content.get("results_development")
-    if results and results != "unknown":
-        adequate = results == "adequate"
-        label = "adecuada" if adequate else "requiere refuerzo"
-        st.markdown(
-            f"{conformance_badge(adequate, not adequate)} — Desarrollo de resultados: {label}",
-            unsafe_allow_html=True,
-        )
-
-
-def render_content_depth(dashboard: dict) -> None:
-    """Compatibilidad: delega en profundidad académica."""
-    render_academic_depth(dashboard)
-
-
 def render_originality(dashboard: dict) -> None:
     orig = dashboard.get("originality_dashboard") or {}
     if not orig:
@@ -975,8 +923,6 @@ def _run_app() -> None:
     render_integrity(dashboard)
     st.divider()
     render_ethics(dashboard)
-    st.divider()
-    render_academic_depth(dashboard)
     st.divider()
     render_originality(dashboard)
     st.divider()
