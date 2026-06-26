@@ -135,6 +135,16 @@ def render_sidebar(report=None) -> "AuditConfig":
                 st.warning(f"Extensión fuera del rango {min_pages}–{max_pages} páginas.")
 
     st.sidebar.markdown("---")
+    usage_count = st.session_state.get("usage_count")
+    if usage_count is None:
+        try:
+            from savt.usage_counter import get_usage_count
+
+            usage_count = get_usage_count()
+        except Exception:
+            usage_count = None
+    if usage_count is not None:
+        st.sidebar.caption(f"Auditorías realizadas: {usage_count:,}")
     st.sidebar.caption(f"Versión {__version__} · Python {sys.version.split()[0]}")
 
     return AuditConfig(

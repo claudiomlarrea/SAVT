@@ -228,7 +228,7 @@ def audit_structure(parsed: dict) -> tuple[list[Finding], dict]:
                 ("problema", ["problema", "problemática", "problematica", "situación problem", "brecha", "planteamiento"]),
                 ("justificación", ["justificación", "justificacion", "relevancia", "pertinencia", "importancia"]),
                 ("pregunta", ["pregunta de investigación", "pregunta central", "¿"]),
-                ("objetivos", ["objetivo general", "objetivos específicos", "objetivos especificos"]),
+                ("objetivos", ["objetivo general", "objetivos específicos", "objetivos especificos", "objetivos particulares", "objetivo particular"]),
             ],
         ),
         parsed,

@@ -96,6 +96,7 @@ CANONICAL_ROLES: dict[str, tuple[str, ...]] = {
     "discusion": (
         "discusión",
         "discusion",
+        "discusiones",
         "discussión",
         "interpretación de los resultados",
         "interpretacion de los resultados",
@@ -117,6 +118,8 @@ CANONICAL_ROLES: dict[str, tuple[str, ...]] = {
     "objetivos": (
         "objetivos específicos",
         "objetivos especificos",
+        "objetivos particulares",
+        "objetivo particular",
         "objetivo general",
         "objetivos del trabajo",
         "objetivos de la investigación",
@@ -202,7 +205,7 @@ def discover_headings(body: str) -> list[Heading]:
         r"MARCO TE[OÓ]RICO|MARCO CONCEPTUAL|FUNDAMENTACI[ÓO]N TE[OÓ]RICA|REVISI[ÓO]N(?:\s+DE\s+LITERATURA|\s+BIBLIOGR[AÁ]FICA)?|"
         r"METODOLOG[IÍ]A|MATERIALES Y M[EÉ]TODOS|MATERIAL Y M[EÉ]TODO|"
         r"RESULTADOS|HALLAZGOS(?:\s+PRINCIPALES)?|"
-        r"DISCUSI[ÓO]N|INTERPRETACI[ÓO]N(?:\s+DE(?:\s+LOS)?\s+RESULTADOS)?|"
+        r"DISCUSI[ÓO]NES?|INTERPRETACI[ÓO]N(?:\s+DE(?:\s+LOS)?\s+RESULTADOS)?|"
         r"CONCLUSIONES(?:\s+GENERALES|\s+FINALES)?|BIBLIOGRAF[IÍ]A|REFERENCIAS|ANEXOS?)\s*(?:$|\s+[A-ZÁÉÍÓÚÑ])",
         r"(?m)^(\d+(?:\.\d+)*\.?\s+[A-ZÁÉÍÓÚÑ][^\n]{4,120})$",
         r"(?m)^(Presentaci[oó]n(?:\s+del\s+Trabajo(?:\s+(?:de\s+)?Tesis| Final)?)?)\s*$",
@@ -305,11 +308,11 @@ _MAJOR_INLINE_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = tuple(
         ),
         (
             "resultados",
-            r"(?:^|\n)\s*(?:RESULTADOS(?:\s+Y\s+DISCUSI[ÓO]N)?|HALLAZGOS(?:\s+PRINCIPALES)?)\b",
+            r"(?:^|\n)\s*(?:RESULTADOS(?:\s+Y\s+DISCUSI[ÓO]NES?)?|HALLAZGOS(?:\s+PRINCIPALES)?)\b",
         ),
         (
             "discusion",
-            r"(?:^|\n)\s*(?:DISCUSI[ÓO]N|INTERPRETACI[ÓO]N(?:\s+DE(?:\s+LOS)?\s+RESULTADOS)?|"
+            r"(?:^|\n)\s*(?:DISCUSI[ÓO]NES?|INTERPRETACI[ÓO]N(?:\s+DE(?:\s+LOS)?\s+RESULTADOS)?|"
             r"AN[ÁA]LISIS(?:\s+E?\s*)?INTERPRETACI[ÓO]N)\b",
         ),
         (
@@ -369,6 +372,7 @@ def _scan_major_section_spans(body: str) -> list[tuple[int, str, str]]:
 
 
 _OBJ_SECTION_NUM = r"(?:\d+(?:\.\d+)*\.?\s*)?"
+_OBJ_SPECIFIC_HEADING = r"Objetivos?\s+(?:espec[ií]ficos?|particulares?)"
 
 
 def _extract_objetivos_block(body: str) -> tuple[str, list[str]]:
@@ -377,8 +381,8 @@ def _extract_objetivos_block(body: str) -> tuple[str, list[str]]:
     for pattern in (
         rf"(?im)(?:^|\n)\s*{_OBJ_SECTION_NUM}Objetivo general\b",
         rf"(?im)(?:^|\n)\s*Objetivo general\b",
-        rf"(?im)(?:^|\n)\s*{_OBJ_SECTION_NUM}Objetivos espec[ií]ficos\b",
-        rf"(?im)(?:^|\n)\s*Objetivos espec[ií]ficos\b",
+        rf"(?im)(?:^|\n)\s*{_OBJ_SECTION_NUM}{_OBJ_SPECIFIC_HEADING}\b",
+        rf"(?im)(?:^|\n)\s*{_OBJ_SPECIFIC_HEADING}\b",
     ):
         match = re.search(pattern, body)
         if match:
@@ -659,8 +663,8 @@ def _find_objetivos_start(body: str, *, before_pos: int | None = None) -> tuple[
             "Objetivos",
         ),
         (
-            rf"(?im)(?:^|\n)\s*{_OBJ_SECTION_NUM}Objetivos espec[ií]ficos\b",
-            "Objetivos específicos",
+            rf"(?im)(?:^|\n)\s*{_OBJ_SECTION_NUM}{_OBJ_SPECIFIC_HEADING}\b",
+            "Objetivos",
         ),
     ]
     for pattern, title in patterns_titles:
@@ -783,7 +787,7 @@ def _find_discusion_between(body: str, start: int, end: int) -> int | None:
         return None
     hits = [
         start + match.start()
-        for match in re.finditer(r"(?m)(?:^|\n)\s*Discusi[oó]n\b", body[start:end])
+        for match in re.finditer(r"(?m)(?:^|\n)\s*Discusi[oó]nes?\b", body[start:end])
     ]
     if not hits:
         return None
@@ -853,12 +857,12 @@ def _find_major_section_boundaries(
             "discusion",
             "Discusión",
             [
-                rf"(?im){_PARTE}DISCUSI[ÓO]N",
-                r"(?m)(?:^|\n)\s*Discusi[oó]n\s*(?:\n|$|\d+\.)",
-                r"(?m)(?:^|\n)\s*DISCUSI[ÓO]N\s*(?:\n|$|\d+\.)",
+                rf"(?im){_PARTE}DISCUSI[ÓO]NES?",
+                r"(?m)(?:^|\n)\s*Discusi[oó]nes?\s*(?:\n|$|\d+\.)",
+                r"(?m)(?:^|\n)\s*DISCUSI[ÓO]NES?\s*(?:\n|$|\d+\.)",
                 r"(?m)(?:^|\n)\s*INTERPRETACI[ÓO]N(?:\s+DE(?:\s+LOS)?\s+RESULTADOS)?\s*(?:\n|$|\d+\.)",
-                r"(?m)(?:^|\n)\s*Discusi[oó]n\b(?=\s+[A-ZÁÉÍÓÚÑ])",
-                r"(?m)(?:^|\n)\s*DISCUSI[ÓO]N\b(?=\s+[A-ZÁÉÍÓÚÑ])",
+                r"(?m)(?:^|\n)\s*Discusi[oó]nes?\b(?=\s+[A-ZÁÉÍÓÚÑ])",
+                r"(?m)(?:^|\n)\s*DISCUSI[ÓO]NES?\b(?=\s+[A-ZÁÉÍÓÚÑ])",
             ],
             False,
         ),

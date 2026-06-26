@@ -609,7 +609,7 @@ def extract_research_questions(body: str) -> list[str]:
         re.IGNORECASE | re.DOTALL,
     )
     block_match = re.search(
-        r"Pregunta de investigación(.+?)(?:Objetivo general|Objetivos específicos|Hipótesis|METODOLOG|Capítulo|\n3\.\s)",
+        r"Pregunta de investigación(.+?)(?:Objetivo general|Objetivos específicos|Objetivos particulares|Hipótesis|METODOLOG|Capítulo|\n3\.\s)",
         body,
         re.IGNORECASE | re.DOTALL,
     )
@@ -631,13 +631,14 @@ def extract_research_questions(body: str) -> list[str]:
 
 
 _OBJ_SECTION_NUM = r"(?:\d+(?:\.\d+)*\.?\s*)?"
+_OBJ_SPECIFIC_HEADING = r"Objetivos?\s+(?:espec[ií]ficos?|particulares?)"
 _OBJ_HEADING_GENERAL = rf"(?im)(?:^|\n)\s*{_OBJ_SECTION_NUM}Objetivo\s+general\b"
-_OBJ_HEADING_SPECIFIC = rf"(?im)(?:^|\n)\s*{_OBJ_SECTION_NUM}Objetivos\s+espec[ií]ficos\b"
+_OBJ_HEADING_SPECIFIC = rf"(?im)(?:^|\n)\s*{_OBJ_SECTION_NUM}{_OBJ_SPECIFIC_HEADING}\b"
 _OBJ_END_LOOKAHEAD = (
     r"(?="
     r"\n\s*(?:\d+(?:\.\d+)*\.?\s*)?"
     r"(?:Supuestos|Hipótesis|Hipotesis|CAPÍTULO|CAPITULO|SEGUNDA|TERCERA|CUARTA|QUINTA|"
-    r"METODOLOG|MATERIALES|MARCO TE[OÓ]RICO|RESULTADOS|DISCUSI[ÓO]N|PARTE\s+[-–])"
+    r"METODOLOG|MATERIALES|MARCO TE[OÓ]RICO|RESULTADOS|DISCUSI[ÓO]NES?|PARTE\s+[-–])"
     r"|\Z)"
 )
 _BULLET_CHARS = r"[➤►•●○▪\u25b8\u25ba\u25cf\u25cb\u25aa\u2022\uf0d8\uf0b7\uf076]"
@@ -652,7 +653,7 @@ def _looks_like_section_heading(text: str) -> bool:
     stripped = text.strip()
     if re.match(
         r"(?i)^(materiales|metodolog|marco te[oó]rico|marco conceptual|cap[ií]tulo|"
-        r"hip[oó]tesis|resultados|discusi[oó]n|conclusi[oó]n|introducci[oó]n)\b",
+        r"hip[oó]tesis|resultados|discusi[oó]nes?|conclusi[oó]n|introducci[oó]n|objetivos?\s+(?:espec[ií]ficos?|particulares?)|objetivo\s+general)\b",
         stripped,
     ):
         return True
@@ -671,7 +672,7 @@ def objectives_headings_present(body: str) -> bool:
 
 def _trim_objectives_block(block: str) -> str:
     block = re.sub(
-        r"(?is)\s*(?:\d+(?:\.\d+)*\.?\s*)?Objetivos\s+espec[ií]ficos\s*",
+        rf"(?is)\s*(?:\d+(?:\.\d+)*\.?\s*)?{_OBJ_SPECIFIC_HEADING}\s*",
         "",
         block,
         count=1,
@@ -745,10 +746,11 @@ def _objectives_from_block(block: str) -> list[str]:
 
 def _find_specific_objectives_block(body: str) -> str:
     patterns = [
-        rf"(?is)Objetivos\s+espec[ií]ficos\s*(.+?){_OBJ_END_LOOKAHEAD}",
-        rf"(?is){_OBJ_SECTION_NUM}Objetivos\s+espec[ií]ficos\s*(.+?){_OBJ_END_LOOKAHEAD}",
+        rf"(?is){_OBJ_SPECIFIC_HEADING}\s*(.+?){_OBJ_END_LOOKAHEAD}",
+        rf"(?is){_OBJ_SECTION_NUM}{_OBJ_SPECIFIC_HEADING}\s*(.+?){_OBJ_END_LOOKAHEAD}",
         r"1\.5\.2 Objetivos específicos(.+?)(?:CAPÍTULO II|CAPITULO II)",
-        r"(?is)Objetivos específicos\s*\n(.+?)(?:\n5\.\s+Hipótesis|\nHipótesis de investigación|\nHipótesis|\n\d+\.\s+Metodolog|\nCapítulo|\nMETODOLOG)",
+        r"1\.5\.2 Objetivos particulares(.+?)(?:CAPÍTULO II|CAPITULO II)",
+        r"(?is)Objetivos\s+(?:espec[ií]ficos|particulares)\s*\n(.+?)(?:\n5\.\s+Hipótesis|\nHipótesis de investigación|\nHipótesis|\n\d+\.\s+Metodolog|\nCapítulo|\nMETODOLOG)",
     ]
     for pattern in patterns:
         match = re.search(pattern, body, re.IGNORECASE | re.DOTALL)

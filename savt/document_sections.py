@@ -8,7 +8,7 @@ SECTION_END_MARKERS = (
     r"CAPÍTULO|CAPITULO|"
     r"INTRODUCCI[ÓO]N|PREGUNTA DE INVESTIGACI[ÓO]N|"
     r"AN[ÁA]LISIS BIBLIOM[EÉ]TRICO|MARCO TE[OÓ]RICO|MARCO CONCEPTUAL|"
-    r"METODOLOG[IÍ]A|MATERIALES Y M[EÉ]TODOS|RESULTADOS|DISCUSI[ÓO]N|"
+    r"METODOLOG[IÍ]A|MATERIALES Y M[EÉ]TODOS|RESULTADOS|DISCUSI[ÓO]NES?|"
     r"CONCLUSIONES|BIBLIOGRAF[IÍ]A|REFERENCIAS|ANEXOS"
 )
 
@@ -66,6 +66,7 @@ SECTION_ALIASES: dict[str, tuple[str, ...]] = {
     "resultados": ("resultado", "hallazgo"),
     "discusion": (
         "discusi",
+        "discusiones",
         "análisis de resultados",
         "analisis de resultados",
         "interpretación de resultados",
@@ -225,7 +226,7 @@ def _heading_positions(body: str) -> list[tuple[int, str, str]]:
         (r"(?m)^(CAPÍTULO|CAPITULO)\s+[IVXLC\d]+[\.\s]+(.+)$", "capitulo"),
         (r"(?m)^(INTRODUCCI[ÓO]N|PREGUNTA DE INVESTIGACI[ÓO]N|AN[ÁA]LISIS BIBLIOM[EÉ]TRICO|"
          r"MARCO TE[OÓ]RICO|MARCO CONCEPTUAL|METODOLOG[IÍ]A|MATERIALES Y M[EÉ]TODOS|"
-         r"RESULTADOS|DISCUSI[ÓO]N|CONCLUSIONES)\s*$", "mayus"),
+         r"RESULTADOS|DISCUSI[ÓO]NES?|CONCLUSIONES)\s*$", "mayus"),
         (r"(?m)^(\d+(?:\.\d+)*\.?\s+[A-ZÁÉÍÓÚÑ][^\n]{4,120})$", "numerada"),
         (r"(?m)^(PRIMERA|SEGUNDA|TERCERA|CUARTA|QUINTA)\s+PARTE(?:\s+[-–]?\s*.+)?$", "parte"),
         (r"(?m)^(Presentaci[oó]n(?:\s+del\s+Trabajo(?:\s+(?:de\s+)?Tesis| Final)?)?)\s*$", "presentacion"),

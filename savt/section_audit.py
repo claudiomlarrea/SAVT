@@ -53,6 +53,7 @@ TITLE_SECTION_RULES: tuple[tuple[str, str], ...] = (
     ("figura", "resultados"),
     ("tabla", "resultados"),
     ("discusión", "discusion"),
+    ("discusiones", "discusion"),
     ("resultado", "resultados"),
 )
 
