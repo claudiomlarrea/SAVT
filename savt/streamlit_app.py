@@ -750,6 +750,51 @@ def render_hallazgos(dashboard: dict) -> None:
     render_critical_findings(dashboard)
 
 
+def render_user_feedback(*, context: dict | None = None) -> None:
+    from savt import __version__
+    from savt.user_feedback import submit_user_feedback
+
+    ctx = context or {}
+    st.markdown("## Valoración del sistema")
+    st.caption(
+        "¿Qué le pareció SAVT? Su calificación y comentarios nos ayudan a mejorar la herramienta."
+    )
+
+    with st.form("savt_user_feedback", clear_on_submit=True):
+        rating = st.select_slider(
+            "Calificación general",
+            options=[1, 2, 3, 4, 5],
+            value=4,
+            format_func=lambda value: "★" * value + "☆" * (5 - value),
+            help="1 = muy insatisfecho · 5 = muy satisfecho",
+        )
+        comment = st.text_area(
+            "Su opinión (opcional)",
+            height=120,
+            placeholder=(
+                "Ej.: qué le resultó útil, qué faltaría, si el informe fue claro, "
+                "sugerencias para directores o estudiantes…"
+            ),
+        )
+        submitted = st.form_submit_button("Enviar valoración", type="secondary")
+
+    if not submitted:
+        return
+
+    ok, message = submit_user_feedback(
+        rating,
+        comment,
+        version=__version__,
+        filename=str(ctx.get("filename", "")),
+        icai=ctx.get("icai"),
+        profile=str(ctx.get("profile", "")),
+    )
+    if ok:
+        st.success(message)
+    else:
+        st.error(message)
+
+
 def run_app() -> None:
     try:
         _run_app()
@@ -788,6 +833,8 @@ def _run_app() -> None:
             "Seleccione el perfil institucional en la barra lateral (UCCuyo, UNCUyo, posgrado). "
             "El informe cubre estructura, normativa, integridad, ética y profundidad."
         )
+        st.divider()
+        render_user_feedback()
         return
 
     if st.button("Ejecutar auditoría", type="primary"):
@@ -823,11 +870,15 @@ def _run_app() -> None:
 
     report = st.session_state.get("report")
     if not report or report.filename != uploaded.name:
+        st.divider()
+        render_user_feedback(context={"filename": uploaded.name})
         return
 
     dashboard = report.metadata.get("dashboard", {})
     if not dashboard:
         st.error("Informe incompleto. Vuelva a ejecutar la auditoría.")
+        st.divider()
+        render_user_feedback(context={"filename": uploaded.name})
         return
 
     base_name = uploaded.name.rsplit(".", 1)[0]
@@ -855,3 +906,11 @@ def _run_app() -> None:
     render_technical_section_detail(dashboard)
     st.divider()
     render_final_report(report, dashboard, base_name)
+    st.divider()
+    render_user_feedback(
+        context={
+            "filename": uploaded.name,
+            "icai": dashboard.get("icai"),
+            "profile": dashboard.get("profile_label", ""),
+        }
+    )

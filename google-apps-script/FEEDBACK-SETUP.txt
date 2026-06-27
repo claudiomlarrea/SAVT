@@ -1,0 +1,32 @@
+Configurar valoraciones SAVT en Google Sheets
+==============================================
+
+1. Crear planilla
+   - Google Sheets → nueva planilla (ej. "SAVT Feedback").
+   - Copiar el ID de la URL:
+     https://docs.google.com/spreadsheets/d/ESTE_ES_EL_ID/edit
+
+2. Apps Script
+   - En la planilla: Extensiones → Apps Script.
+   - Pegar el contenido de SAVTFeedback.gs.
+   - Cambiar SPREADSHEET_ID por el ID de la planilla.
+   - (Opcional) Definir FEEDBACK_TOKEN con una clave secreta.
+
+3. Implementar como app web
+   - Implementar → Nueva implementación → Aplicación web.
+   - Ejecutar como: Yo.
+   - Quién tiene acceso: Cualquier persona.
+   - Copiar la URL .../exec.
+
+4. Streamlit Cloud (app SAVT)
+   - Settings → Secrets:
+
+     [feedback]
+     submit_url = "https://script.google.com/macros/s/.../exec"
+     token = "mismo-token-si-lo-usó"
+
+5. Probar
+   - Abrir SAVT, calificar y enviar comentario.
+   - Verificar que aparece una fila en la hoja "Feedback".
+
+En local (sin secrets) las valoraciones se guardan en .savt_usage/feedback.jsonl.
