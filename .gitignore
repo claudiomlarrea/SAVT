@@ -18,6 +18,8 @@ build/
 # Documentos de prueba (no subir tesis al repo)
 *.pdf
 *.docx
+!assets/instructivo_savt.pdf
+!docs/**/*.pdf
 
 .git-data/
 assets/sampieri_ocr/
