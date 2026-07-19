@@ -208,7 +208,9 @@ _INDEX_END_MARKERS = re.compile(
     r"(?im)^(?:abreviaturas|glosario|anexos?|bibliograf|referencias)\s*$",
 )
 _INDEX_BODY_BLEED = re.compile(
-    r"(?im)^\d+\.\s+(?:importancia|estado actual|introducci[oó]n|la donaci[oó]n)\b",
+    # Solo señales claras de cuerpo real; no cortar el TOC de tesis por capítulos
+    # (allí es normal «1. INTRODUCCIÓN» bajo cada CAPÍTULO).
+    r"(?im)^\d+\.\s+(?:importancia|estado actual|la donaci[oó]n)\b",
 )
 def _trim_index_block_end(block: str) -> str:
     """Corta el bloque cuando el índice termina (abreviaturas, cuerpo, etc.)."""
@@ -287,32 +289,71 @@ def _capitulo_entry_from_parts(number: str, rest: str) -> IndexEntry | None:
     )
 
 
+_ROMAN_TO_INT = {
+    "i": 1,
+    "ii": 2,
+    "iii": 3,
+    "iv": 4,
+    "v": 5,
+    "vi": 6,
+    "vii": 7,
+    "viii": 8,
+    "ix": 9,
+    "x": 10,
+    "xi": 11,
+    "xii": 12,
+}
+
+
+def _capitulo_number_token(token: str) -> str | None:
+    token = (token or "").strip().lower()
+    if token.isdigit() and 1 <= int(token) <= 20:
+        return str(int(token))
+    return str(_ROMAN_TO_INT[token]) if token in _ROMAN_TO_INT else None
+
+
 def _scan_capitulo_entries(text: str) -> dict[str, IndexEntry]:
     """Recorre el texto buscando líneas CAPÍTULO N: (índice de artículos compilados)."""
     best: dict[str, IndexEntry] = {}
     lines = text.splitlines()
     idx = 0
+    # Acepta «CAPÍTULO III», «IV CAPÍTULO I:», «7. REFERENCIAS CAPÍTULO II:», «CAPITULO 1».
+    chapter_line = re.compile(
+        r"(?i)(?:^|\b)cap[ií]tulo\s+([IVXLC]+|\d{1,2})\s*[:.]?\s*(.*)$",
+    )
     while idx < len(lines):
         line = lines[idx].strip()
-        match = re.match(r"(?i)^cap[ií]tulo\s+(\d{1,2})\s*[:.]\s*(.*)$", line)
+        match = chapter_line.search(line)
         if not match:
             idx += 1
             continue
-        number = match.group(1)
+        number = _capitulo_number_token(match.group(1))
+        if not number:
+            idx += 1
+            continue
         rest = match.group(2).strip()
+        # Evitar capturar «CAPÍTULO» solo como página romana de índice sin título útil
+        # cuando el resto es vacío y la siguiente línea es otro capítulo.
         while idx + 1 < len(lines):
             nxt = lines[idx + 1].strip()
             if not nxt:
                 idx += 1
                 continue
-            if re.match(r"(?i)^cap[ií]tulo\s+\d", nxt):
+            if chapter_line.search(nxt):
                 break
             if re.search(r"(?:[.\u2026…]{2,})\s*\d{1,4}\s*$", rest):
                 break
             if re.match(r"^\d+\.\s+", nxt) and len(rest) > 15:
                 break
-            rest = f"{rest} {nxt}"
+            # Títulos en mayúsculas en la línea siguiente (cuerpo: CAPITULO 1\n\nTÍTULO)
+            if not rest and re.match(r"^[A-ZÁÉÍÓÚÑ]", nxt) and len(nxt) > 12:
+                rest = nxt
+                idx += 1
+                break
+            rest = f"{rest} {nxt}".strip()
             idx += 1
+            if len(rest) > 180:
+                break
         entry = _capitulo_entry_from_parts(number, rest)
         if entry:
             prev = best.get(number)

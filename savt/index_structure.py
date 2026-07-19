@@ -133,6 +133,229 @@ def _role_for_entry(entry: IndexEntry, used_roles: set[str]) -> str:
     return role
 
 
+def index_layout_is_usable(layout: dict | None) -> bool:
+    """Rechaza particiones de índice que concentran casi todo el texto en 1–2 bloques."""
+    if not layout or layout.get("structure_source") != "index":
+        return False
+    sections = layout.get("index_sections") or []
+    if len(sections) < 3:
+        return False
+    words = [max(0, int(item.get("words") or 0)) for item in sections]
+    total = sum(words) or 1
+    if max(words) / total >= 0.70:
+        return False
+    roles = {str(item.get("role") or "otros") for item in sections}
+    canonical = roles & {
+        "introduccion",
+        "objetivos",
+        "marco_teorico",
+        "metodologia",
+        "resultados",
+        "discusion",
+        "conclusiones",
+        "presentacion",
+    }
+    if len(canonical) <= 1 and "otros" in roles and max(words) / total >= 0.50:
+        return False
+    return True
+
+
+_BODY_CAPITULO = re.compile(
+    r"(?im)(?:^|\n)\s*CAP[IÍ]TULO\s+([IVXLC]+|\d{1,2})\b([^\n]*)",
+)
+
+
+def _roman_or_digit_to_int(token: str) -> int | None:
+    token = (token or "").strip().lower()
+    if token.isdigit() and 1 <= int(token) <= 20:
+        return int(token)
+    mapping = {
+        "i": 1,
+        "ii": 2,
+        "iii": 3,
+        "iv": 4,
+        "v": 5,
+        "vi": 6,
+        "vii": 7,
+        "viii": 8,
+        "ix": 9,
+        "x": 10,
+    }
+    return mapping.get(token)
+
+
+def partition_from_body_capitulos(full_text: str) -> dict | None:
+    """
+    Tesis por capítulos/artículos: localiza CAPÍTULOS en el cuerpo (no en el TOC)
+    y construye apartados + mapa canónico (objetivos/métodos/resultados/discusión).
+    """
+    if not full_text:
+        return None
+    matches = list(_BODY_CAPITULO.finditer(full_text))
+    if len(matches) < 3:
+        return None
+
+    # Preferir ocurrencias del cuerpo (después del primer tercio del documento o
+    # la segunda aparición de cada número cuando el TOC repite títulos).
+    by_num: dict[int, list[re.Match[str]]] = {}
+    for match in matches:
+        num = _roman_or_digit_to_int(match.group(1))
+        if num is None:
+            continue
+        by_num.setdefault(num, []).append(match)
+
+    selected: list[tuple[int, int, str]] = []  # (num, pos, title)
+    for num in sorted(by_num):
+        opts = by_num[num]
+        # Si hay varias, tomar la última en la primera mitad o la del cuerpo.
+        chosen = opts[-1] if len(opts) > 1 else opts[0]
+        if len(opts) > 1 and opts[0].start() < len(full_text) * 0.12:
+            chosen = opts[-1]
+        title_tail = re.sub(r"\s+", " ", (chosen.group(2) or "").strip(" :.-–"))
+        if len(title_tail) < 8:
+            # Título en líneas siguientes
+            after = full_text[chosen.end() : chosen.end() + 300]
+            nxt = re.search(r"(?m)^\s*([A-ZÁÉÍÓÚÑ][^\n]{12,160})", after)
+            title_tail = nxt.group(1).strip() if nxt else f"Capítulo {num}"
+        selected.append((num, chosen.start(), title_tail[:160]))
+
+    if len(selected) < 3:
+        return None
+
+    # Evitar quedarnos en el TOC: el primer capítulo de cuerpo no debería estar
+    # demasiado al inicio si hay muchas menciones tempranas.
+    if selected[0][1] < len(full_text) * 0.08 and len(matches) >= 6:
+        # Recalcular tomando siempre la última aparición de cada número.
+        selected = []
+        for num in sorted(by_num):
+            chosen = by_num[num][-1]
+            title_tail = re.sub(r"\s+", " ", (chosen.group(2) or "").strip(" :.-–"))
+            if len(title_tail) < 8:
+                after = full_text[chosen.end() : chosen.end() + 300]
+                nxt = re.search(r"(?m)^\s*([A-ZÁÉÍÓÚÑ][^\n]{12,160})", after)
+                title_tail = nxt.group(1).strip() if nxt else f"Capítulo {num}"
+            selected.append((num, chosen.start(), title_tail[:160]))
+
+    boundaries = sorted(selected, key=lambda item: item[1])
+    section_map: dict[str, str] = {}
+    section_meta: dict[str, dict] = {}
+    index_sections: list[dict] = []
+
+    for idx, (num, pos, title) in enumerate(boundaries):
+        end = boundaries[idx + 1][1] if idx + 1 < len(boundaries) else len(full_text)
+        chunk = full_text[pos:end].strip()
+        words = count_words(chunk)
+        if words < 80:
+            continue
+        display = f"CAPÍTULO {num}: {title}" if title else f"CAPÍTULO {num}"
+        role = classify_heading(display) or "otros"
+        # Capítulos revisivos tempranos → marco; empíricos con métodos → se refinan abajo
+        if role == "otros" and num <= 2:
+            role = "marco_teorico"
+        # Evitar colisiones de rol canónico entre capítulos.
+        used = {s["role"] for s in index_sections}
+        assigned = role
+        if assigned in used:
+            assigned = f"{role}_cap{num}"
+        index_sections.append(
+            {
+                "role": assigned,
+                "title": display,
+                "page": str(num),
+                "words": words,
+            }
+        )
+        base = role  # rol canónico sin sufijo de colisión
+        if base in section_map:
+            section_map[base] = f"{section_map[base]}\n\n{chunk}"
+            section_meta[base]["detected_titles"].append(display)
+        else:
+            section_map[base] = chunk
+            section_meta[base] = {"detected_titles": [display]}
+
+    # Extraer roles canónicos desde capítulos empíricos (MÉTODOS, RESULTADOS, …).
+    from savt.section_resolver import build_enriched_section_map
+
+    empirical = full_text[boundaries[max(0, len(boundaries) - 3)][1] :]
+    enriched, enriched_meta = build_enriched_section_map(empirical)
+    for role, text in enriched.items():
+        if role in {"presentacion"} and count_words(text) > count_words(empirical) * 0.4:
+            continue
+        if count_words(text) < 60:
+            continue
+        if role not in section_map or count_words(text) > count_words(section_map.get(role, "")):
+            section_map[role] = text
+            section_meta[role] = enriched_meta.get(role) or {
+                "detected_titles": [role],
+                "from_empirical_chapters": True,
+            }
+
+    # Objetivos / justificación suelen estar en CAPÍTULO III
+    obj_chunk = ""
+    for num, pos, title in boundaries:
+        end = next((p for n, p, t in boundaries if p > pos), len(full_text))
+        piece = full_text[pos:end]
+        if re.search(r"(?i)objetivo\s+general|objetivos\s+espec|justificaci", piece):
+            obj_chunk = piece
+            break
+    if obj_chunk and count_words(obj_chunk) >= 40:
+        section_map["objetivos"] = obj_chunk
+        section_meta["objetivos"] = {"detected_titles": ["Objetivos / justificación / hipótesis"]}
+
+    body = full_text
+    total_body_words = count_words(body)
+    covered = 0
+    for idx, item in enumerate(index_sections):
+        if idx == len(index_sections) - 1:
+            item["words"] = max(item["words"], max(0, total_body_words - covered))
+        covered += item["words"]
+        pct = round(item["words"] * 100 / max(total_body_words, 1), 1)
+        item["percent"] = pct
+        item["percent_label"] = f"{pct:.1f}%"
+
+    # Vista canónica para confirmación: priorizar roles auditables
+    canonical_sections: list[dict] = []
+    order = [
+        ("presentacion", "Presentación / resumen"),
+        ("introduccion", "Introducción"),
+        ("objetivos", "Pregunta, objetivos e hipótesis"),
+        ("marco_teorico", "Marco teórico"),
+        ("metodologia", "Metodología"),
+        ("resultados", "Resultados"),
+        ("discusion", "Discusión"),
+        ("conclusiones", "Conclusiones"),
+    ]
+    for role, label in order:
+        text = section_map.get(role, "")
+        words = count_words(text)
+        if words <= 0:
+            continue
+        titles = (section_meta.get(role) or {}).get("detected_titles") or [label]
+        pct = round(words * 100 / max(total_body_words, 1), 1)
+        canonical_sections.append(
+            {
+                "role": role,
+                "title": titles[0],
+                "page": "",
+                "words": words,
+                "percent": pct,
+                "percent_label": f"{pct:.1f}%",
+            }
+        )
+
+    display_sections = canonical_sections if len(canonical_sections) >= 3 else index_sections
+
+    return {
+        "body": body,
+        "bibliography_text": "",
+        "section_map": section_map,
+        "section_meta": section_meta,
+        "index_entries": [],
+        "index_sections": display_sections,
+        "structure_source": "capitulos",
+    }
+
+
 def partition_from_index(
     full_text: str,
     *,

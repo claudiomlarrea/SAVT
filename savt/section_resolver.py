@@ -62,6 +62,8 @@ CANONICAL_ROLES: dict[str, tuple[str, ...]] = {
     "metodologia": (
         "metodología",
         "metodologia",
+        "métodos",
+        "metodos",
         "materiales y métodos",
         "materiales y metodos",
         "material y método",
@@ -203,10 +205,10 @@ def discover_headings(body: str) -> list[Heading]:
         r"(?m)^(TOMO\s+[IVXLC\d]+)\s*$",
         r"(?m)^(INTRODUCCI[ÓO]N|PLANTEAMIENTO(?:\s+DEL\s+(?:PROBLEMA|TEMA))?|PREGUNTA DE INVESTIGACI[ÓO]N|AN[ÁA]LISIS BIBLIOM[EÉ]TRICO|"
         r"MARCO TE[OÓ]RICO|MARCO CONCEPTUAL|FUNDAMENTACI[ÓO]N TE[OÓ]RICA|REVISI[ÓO]N(?:\s+DE\s+LITERATURA|\s+BIBLIOGR[AÁ]FICA)?|"
-        r"METODOLOG[IÍ]A|MATERIALES Y M[EÉ]TODOS|MATERIAL Y M[EÉ]TODO|"
+        r"METODOLOG[IÍ]A|MATERIALES Y M[EÉ]TODOS|MATERIAL Y M[EÉ]TODO|M[EÉ]TODOS|"
         r"RESULTADOS|HALLAZGOS(?:\s+PRINCIPALES)?|"
-        r"DISCUSI[ÓO]NES?|INTERPRETACI[ÓO]N(?:\s+DE(?:\s+LOS)?\s+RESULTADOS)?|"
-        r"CONCLUSIONES(?:\s+GENERALES|\s+FINALES)?|BIBLIOGRAF[IÍ]A|REFERENCIAS|ANEXOS?)\s*(?:$|\s+[A-ZÁÉÍÓÚÑ])",
+        r"DISCUSI[ÓO]N(?:ES)?|INTERPRETACI[ÓO]N(?:\s+DE(?:\s+LOS)?\s+RESULTADOS)?|"
+        r"CONCLUSIONES?(?:\s+GENERALES|\s+FINALES)?|BIBLIOGRAF[IÍ]A|REFERENCIAS|ANEXOS?)\s*(?:$|\s+[A-ZÁÉÍÓÚÑ])",
         r"(?m)^(\d+(?:\.\d+)*\.?\s+[A-ZÁÉÍÓÚÑ][^\n]{4,120})$",
         r"(?m)^(Presentaci[oó]n(?:\s+del\s+Trabajo(?:\s+(?:de\s+)?Tesis| Final)?)?)\s*$",
         r"(?m)^(RESUMEN|ABSTRACT|S[ií]ntesis)\s*$",
@@ -304,20 +306,20 @@ _MAJOR_INLINE_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = tuple(
         (
             "metodologia",
             r"(?:^|\n)\s*(?:METODOLOG[IÍ]A|MATERIALES Y M[EÉ]TODOS|MATERIAL Y M[EÉ]TODO|"
-            r"DISE[ÑN]O METODOL[ÓO]GICO|DECISIONES METODOL[ÓO]GICAS)\b",
+            r"M[EÉ]TODOS|DISE[ÑN]O METODOL[ÓO]GICO|DECISIONES METODOL[ÓO]GICAS)\b",
         ),
         (
             "resultados",
-            r"(?:^|\n)\s*(?:RESULTADOS(?:\s+Y\s+DISCUSI[ÓO]NES?)?|HALLAZGOS(?:\s+PRINCIPALES)?)\b",
+            r"(?:^|\n)\s*(?:RESULTADOS(?:\s+Y\s+DISCUSI[ÓO]N(?:ES)?)?|HALLAZGOS(?:\s+PRINCIPALES)?)\b",
         ),
         (
             "discusion",
-            r"(?:^|\n)\s*(?:DISCUSI[ÓO]NES?|INTERPRETACI[ÓO]N(?:\s+DE(?:\s+LOS)?\s+RESULTADOS)?|"
+            r"(?:^|\n)\s*(?:DISCUSI[ÓO]N(?:ES)?|INTERPRETACI[ÓO]N(?:\s+DE(?:\s+LOS)?\s+RESULTADOS)?|"
             r"AN[ÁA]LISIS(?:\s+E?\s*)?INTERPRETACI[ÓO]N)\b",
         ),
         (
             "conclusiones",
-            r"(?:^|\n)\s*CONCLUSIONES(?:\s+GENERALES|\s+FINALES)?\b",
+            r"(?:^|\n)\s*CONCLUSI[ÓO]N(?:ES)?(?:\s+GENERALES|\s+FINALES)?\b",
         ),
     ]
 )
@@ -787,7 +789,7 @@ def _find_discusion_between(body: str, start: int, end: int) -> int | None:
         return None
     hits = [
         start + match.start()
-        for match in re.finditer(r"(?m)(?:^|\n)\s*Discusi[oó]nes?\b", body[start:end])
+        for match in re.finditer(r"(?m)(?:^|\n)\s*Discusi[oó]n(?:es)?\b", body[start:end])
     ]
     if not hits:
         return None
@@ -835,6 +837,7 @@ def _find_major_section_boundaries(
                 r"(?im)(?:^|\n)\s*METODOLOG[IÍ]A\s",
                 r"(?im)(?:^|\n)\s*METODOLOG[IÍ]A\s*(?:\n|$|\d+\.)",
                 r"(?m)(?:^|\n)\s*MATERIALES Y M[EÉ]TODOS\s*(?:\n|$|\d+\.)",
+                r"(?m)(?:^|\n)\s*M[EÉ]TODOS\s*(?:\n|$|\d+\.)",
                 r"(?m)(?:^|\n)\s*DISE[ÑN]O METODOL[ÓO]GICO\s*(?:\n|$|\d+\.)",
                 r"(?m)(?:^|\n)\s*METODOLOG[IÍ]A\b(?=\s+[A-ZÁÉÍÓÚÑ])",
             ],
@@ -857,12 +860,12 @@ def _find_major_section_boundaries(
             "discusion",
             "Discusión",
             [
-                rf"(?im){_PARTE}DISCUSI[ÓO]NES?",
-                r"(?m)(?:^|\n)\s*Discusi[oó]nes?\s*(?:\n|$|\d+\.)",
-                r"(?m)(?:^|\n)\s*DISCUSI[ÓO]NES?\s*(?:\n|$|\d+\.)",
+                rf"(?im){_PARTE}DISCUSI[ÓO]N(?:ES)?",
+                r"(?m)(?:^|\n)\s*Discusi[oó]n(?:es)?\s*(?:\n|$|\d+\.)",
+                r"(?m)(?:^|\n)\s*DISCUSI[ÓO]N(?:ES)?\s*(?:\n|$|\d+\.)",
                 r"(?m)(?:^|\n)\s*INTERPRETACI[ÓO]N(?:\s+DE(?:\s+LOS)?\s+RESULTADOS)?\s*(?:\n|$|\d+\.)",
-                r"(?m)(?:^|\n)\s*Discusi[oó]nes?\b(?=\s+[A-ZÁÉÍÓÚÑ])",
-                r"(?m)(?:^|\n)\s*DISCUSI[ÓO]NES?\b(?=\s+[A-ZÁÉÍÓÚÑ])",
+                r"(?m)(?:^|\n)\s*Discusi[oó]n(?:es)?\b(?=\s+[A-ZÁÉÍÓÚÑ])",
+                r"(?m)(?:^|\n)\s*DISCUSI[ÓO]N(?:ES)?\b(?=\s+[A-ZÁÉÍÓÚÑ])",
             ],
             False,
         ),
@@ -871,8 +874,8 @@ def _find_major_section_boundaries(
             "Conclusiones",
             [
                 rf"(?im){_PARTE}CONCLUSIONES",
-                r"(?m)(?:^|\n)\s*CONCLUSIONES(?:\s+GENERALES|\s+FINALES)?\s*(?:\n|$|\d+\.)",
-                r"(?m)(?:^|\n)\s*CONCLUSIONES\b(?=\s+[A-ZÁÉÍÓÚÑ])",
+                r"(?m)(?:^|\n)\s*CONCLUSI[ÓO]N(?:ES)?(?:\s+GENERALES|\s+FINALES)?\s*(?:\n|$|\d+\.)",
+                r"(?m)(?:^|\n)\s*CONCLUSI[ÓO]N(?:ES)?\b(?=\s+[A-ZÁÉÍÓÚÑ])",
             ],
             True,
         ),

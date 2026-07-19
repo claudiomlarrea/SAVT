@@ -211,6 +211,7 @@ def render_structure_confirmation(sections: list[dict], structure_source: str = 
     if structure_source:
         source_label = {
             "index": "índice del documento",
+            "capitulos": "capítulos del cuerpo del documento",
             "headings": "encabezados del cuerpo",
             "confirmed": "confirmación previa",
         }.get(structure_source, structure_source)

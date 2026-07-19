@@ -36,12 +36,10 @@ def confidence_for_section(
         "",
         "—",
         "detectado por contenido",
-        role.replace("_", " "),
-        ROLE_LABELS.get(role, "").lower(),
     }
     weak_title = title in weak_titles or "detectado por contenido" in title
 
-    if source == "index" or structure_source == "index":
+    if source == "index" or structure_source in {"index", "capitulos"}:
         if words >= 200 and not weak_title:
             return "high", CONFIDENCE_LABELS["high"]
         if words >= 80:
@@ -50,7 +48,7 @@ def confidence_for_section(
 
     if words >= 400 and not weak_title:
         return "high", CONFIDENCE_LABELS["high"]
-    if words >= 150 and not weak_title:
+    if words >= 150:
         return "medium", CONFIDENCE_LABELS["medium"]
     if words >= 80:
         return "medium" if not weak_title else "low", (

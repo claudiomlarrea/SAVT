@@ -14,7 +14,12 @@ from savt.index_parser import (
     parse_index_entries,
     top_level_index_entries,
 )
-from savt.index_structure import page_char_offsets, partition_from_index
+from savt.index_structure import (
+    index_layout_is_usable,
+    page_char_offsets,
+    partition_from_body_capitulos,
+    partition_from_index,
+)
 from savt.models import ReferenceEntry
 from savt.word_stats import count_words
 
@@ -108,14 +113,21 @@ def run_document_pipeline(
         page_offsets=page_offsets,
         page_count=page_count,
     )
+    if not index_layout_is_usable(index_layout):
+        index_layout = None
 
-    if index_layout and index_layout.get("structure_source") == "index":
+    if index_layout is None:
+        capitulo_layout = partition_from_body_capitulos(full_text)
+        if capitulo_layout and len(capitulo_layout.get("index_sections") or []) >= 3:
+            index_layout = capitulo_layout
+
+    if index_layout and index_layout.get("structure_source") in {"index", "capitulos"}:
         body = index_layout["body"]
         bib_text = index_layout["bibliography_text"]
         section_map = index_layout["section_map"]
         section_meta = index_layout["section_meta"]
         index_sections = index_layout["index_sections"]
-        structure_source = "index"
+        structure_source = index_layout.get("structure_source") or "index"
         if not bib_text.strip():
             from savt.parser import split_body_and_bibliography
 
@@ -124,7 +136,11 @@ def run_document_pipeline(
                 body = split_body
                 bib_text = split_bib
         step2_status = "ok"
-        step2_summary = "Apartados del índice aplicados al documento"
+        step2_summary = (
+            "Apartados por capítulos del documento"
+            if structure_source == "capitulos"
+            else "Apartados del índice aplicados al documento"
+        )
     else:
         from savt.parser import remove_index_duplicate, split_body_and_bibliography
         from savt.pdf_parser import remove_pdf_front_matter
