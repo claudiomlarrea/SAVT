@@ -98,16 +98,38 @@ def inject_branding() -> None:
             background-color: {UCCUYO_BG_SOFT};
         }}
 
-        .stButton > button[kind="primary"] {{
+        .stButton > button[kind="primary"],
+        .stButton > button[data-testid="stBaseButton-primary"],
+        button[kind="primary"],
+        button[data-testid="stBaseButton-primary"] {{
             background-color: {UCCUYO_GREEN};
             border: 1px solid {UCCUYO_GREEN_DARK};
-            color: #ffffff;
+            color: #ffffff !important;
             font-weight: 600;
         }}
 
-        .stButton > button[kind="primary"]:hover {{
-            background-color: {UCCUYO_GREEN_DARK};
-            border-color: {UCCUYO_GREEN_SHIELD};
+        .stButton > button[kind="primary"]:hover,
+        .stButton > button[kind="primary"]:focus,
+        .stButton > button[kind="primary"]:active,
+        .stButton > button[data-testid="stBaseButton-primary"]:hover,
+        .stButton > button[data-testid="stBaseButton-primary"]:focus,
+        .stButton > button[data-testid="stBaseButton-primary"]:active,
+        button[kind="primary"]:hover,
+        button[kind="primary"]:focus,
+        button[kind="primary"]:active,
+        button[data-testid="stBaseButton-primary"]:hover,
+        button[data-testid="stBaseButton-primary"]:focus,
+        button[data-testid="stBaseButton-primary"]:active {{
+            background-color: {UCCUYO_GREEN_DARK} !important;
+            border-color: {UCCUYO_GREEN_SHIELD} !important;
+            color: #ffffff !important;
+        }}
+
+        .stButton > button[kind="primary"] *,
+        .stButton > button[data-testid="stBaseButton-primary"] *,
+        button[kind="primary"] *,
+        button[data-testid="stBaseButton-primary"] * {{
+            color: #ffffff !important;
         }}
 
         .stDownloadButton > button {{
