@@ -84,6 +84,8 @@ def detect_document_sections(parsed: dict) -> list[dict]:
                     "percent_label": item.get("percent_label", "—"),
                     "order": idx,
                     "page": item.get("page"),
+                    "level": item.get("level", 1),
+                    "path": item.get("path") or item.get("title"),
                     "source": (
                         "manual"
                         if structure_source == "manual"

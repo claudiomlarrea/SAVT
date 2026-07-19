@@ -186,92 +186,28 @@ def _roman_or_digit_to_int(token: str) -> int | None:
 
 def partition_from_body_capitulos(full_text: str) -> dict | None:
     """
-    Tesis por capítulos/artículos: localiza CAPÍTULOS en el cuerpo (no en el TOC)
-    y construye apartados + mapa canónico (objetivos/métodos/resultados/discusión).
+    Tesis por capítulos/artículos: localiza CAPÍTULOS en el cuerpo (no en el TOC),
+    arma árbol jerárquico y mapa canónico para evaluadores.
     """
     if not full_text:
         return None
-    matches = list(_BODY_CAPITULO.finditer(full_text))
-    if len(matches) < 3:
+
+    from savt.structure_tree import (
+        build_structure_tree,
+        flatten_tree_for_display,
+        select_body_capitulo_boundaries,
+        tree_to_section_map,
+    )
+
+    boundaries = select_body_capitulo_boundaries(full_text)
+    if len(boundaries) < 3:
         return None
 
-    # Preferir ocurrencias del cuerpo (después del primer tercio del documento o
-    # la segunda aparición de cada número cuando el TOC repite títulos).
-    by_num: dict[int, list[re.Match[str]]] = {}
-    for match in matches:
-        num = _roman_or_digit_to_int(match.group(1))
-        if num is None:
-            continue
-        by_num.setdefault(num, []).append(match)
-
-    selected: list[tuple[int, int, str]] = []  # (num, pos, title)
-    for num in sorted(by_num):
-        opts = by_num[num]
-        # Si hay varias, tomar la última en la primera mitad o la del cuerpo.
-        chosen = opts[-1] if len(opts) > 1 else opts[0]
-        if len(opts) > 1 and opts[0].start() < len(full_text) * 0.12:
-            chosen = opts[-1]
-        title_tail = re.sub(r"\s+", " ", (chosen.group(2) or "").strip(" :.-–"))
-        if len(title_tail) < 8:
-            # Título en líneas siguientes
-            after = full_text[chosen.end() : chosen.end() + 300]
-            nxt = re.search(r"(?m)^\s*([A-ZÁÉÍÓÚÑ][^\n]{12,160})", after)
-            title_tail = nxt.group(1).strip() if nxt else f"Capítulo {num}"
-        selected.append((num, chosen.start(), title_tail[:160]))
-
-    if len(selected) < 3:
+    tree = build_structure_tree(full_text)
+    if len(tree) < 3:
         return None
 
-    # Evitar quedarnos en el TOC: el primer capítulo de cuerpo no debería estar
-    # demasiado al inicio si hay muchas menciones tempranas.
-    if selected[0][1] < len(full_text) * 0.08 and len(matches) >= 6:
-        # Recalcular tomando siempre la última aparición de cada número.
-        selected = []
-        for num in sorted(by_num):
-            chosen = by_num[num][-1]
-            title_tail = re.sub(r"\s+", " ", (chosen.group(2) or "").strip(" :.-–"))
-            if len(title_tail) < 8:
-                after = full_text[chosen.end() : chosen.end() + 300]
-                nxt = re.search(r"(?m)^\s*([A-ZÁÉÍÓÚÑ][^\n]{12,160})", after)
-                title_tail = nxt.group(1).strip() if nxt else f"Capítulo {num}"
-            selected.append((num, chosen.start(), title_tail[:160]))
-
-    boundaries = sorted(selected, key=lambda item: item[1])
-    section_map: dict[str, str] = {}
-    section_meta: dict[str, dict] = {}
-    index_sections: list[dict] = []
-
-    for idx, (num, pos, title) in enumerate(boundaries):
-        end = boundaries[idx + 1][1] if idx + 1 < len(boundaries) else len(full_text)
-        chunk = full_text[pos:end].strip()
-        words = count_words(chunk)
-        if words < 80:
-            continue
-        display = f"CAPÍTULO {num}: {title}" if title else f"CAPÍTULO {num}"
-        role = classify_heading(display) or "otros"
-        # Capítulos revisivos tempranos → marco; empíricos con métodos → se refinan abajo
-        if role == "otros" and num <= 2:
-            role = "marco_teorico"
-        # Evitar colisiones de rol canónico entre capítulos.
-        used = {s["role"] for s in index_sections}
-        assigned = role
-        if assigned in used:
-            assigned = f"{role}_cap{num}"
-        index_sections.append(
-            {
-                "role": assigned,
-                "title": display,
-                "page": str(num),
-                "words": words,
-            }
-        )
-        base = role  # rol canónico sin sufijo de colisión
-        if base in section_map:
-            section_map[base] = f"{section_map[base]}\n\n{chunk}"
-            section_meta[base]["detected_titles"].append(display)
-        else:
-            section_map[base] = chunk
-            section_meta[base] = {"detected_titles": [display]}
+    section_map, section_meta = tree_to_section_map(tree, full_text)
 
     # Extraer roles canónicos desde capítulos empíricos (MÉTODOS, RESULTADOS, …).
     from savt.section_resolver import build_enriched_section_map
@@ -302,57 +238,19 @@ def partition_from_body_capitulos(full_text: str) -> dict | None:
         section_map["objetivos"] = obj_chunk
         section_meta["objetivos"] = {"detected_titles": ["Objetivos / justificación / hipótesis"]}
 
-    body = full_text
-    total_body_words = count_words(body)
-    covered = 0
-    for idx, item in enumerate(index_sections):
-        if idx == len(index_sections) - 1:
-            item["words"] = max(item["words"], max(0, total_body_words - covered))
-        covered += item["words"]
-        pct = round(item["words"] * 100 / max(total_body_words, 1), 1)
-        item["percent"] = pct
-        item["percent_label"] = f"{pct:.1f}%"
-
-    # Vista canónica para confirmación: priorizar roles auditables
-    canonical_sections: list[dict] = []
-    order = [
-        ("presentacion", "Presentación / resumen"),
-        ("introduccion", "Introducción"),
-        ("objetivos", "Pregunta, objetivos e hipótesis"),
-        ("marco_teorico", "Marco teórico"),
-        ("metodologia", "Metodología"),
-        ("resultados", "Resultados"),
-        ("discusion", "Discusión"),
-        ("conclusiones", "Conclusiones"),
-    ]
-    for role, label in order:
-        text = section_map.get(role, "")
-        words = count_words(text)
-        if words <= 0:
-            continue
-        titles = (section_meta.get(role) or {}).get("detected_titles") or [label]
-        pct = round(words * 100 / max(total_body_words, 1), 1)
-        canonical_sections.append(
-            {
-                "role": role,
-                "title": titles[0],
-                "page": "",
-                "words": words,
-                "percent": pct,
-                "percent_label": f"{pct:.1f}%",
-            }
-        )
-
-    display_sections = canonical_sections if len(canonical_sections) >= 3 else index_sections
+    # Tabla principal: capítulos (jerarquía real). Hijos van en structure_tree.
+    display_sections = flatten_tree_for_display(tree, include_children=False)
 
     return {
-        "body": body,
+        "body": full_text,
         "bibliography_text": "",
         "section_map": section_map,
         "section_meta": section_meta,
         "index_entries": [],
         "index_sections": display_sections,
         "structure_source": "capitulos",
+        "structure_tree": tree,
+        "thesis_type": "compendio",
     }
 
 

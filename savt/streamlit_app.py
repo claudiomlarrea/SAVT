@@ -165,11 +165,20 @@ def render_sidebar(report=None) -> "AuditConfig":
 def render_detected_sections(dashboard: dict) -> None:
     """Apartados identificados automáticamente en el documento cargado."""
     detected = dashboard.get("detected_sections") or []
+    thesis_type = dashboard.get("thesis_type") or "clasica"
+    tree = dashboard.get("structure_tree") or []
+
     st.markdown("## Apartados detectados en el documento")
-    st.caption(
-        "SAVT reconoce primero la estructura real del archivo (encabezados, capítulos o secciones "
-        "canónicas) y luego audita cada bloque por separado."
-    )
+    if thesis_type == "compendio":
+        st.caption(
+            "Tesis por **capítulos / compendio**: se muestran los capítulos como nivel 1. "
+            "Los subtítulos quedan en el árbol (no se mezclan como si fueran capítulos)."
+        )
+    else:
+        st.caption(
+            "SAVT reconoce primero la estructura real del archivo (encabezados, capítulos o secciones "
+            "canónicas) y luego audita cada bloque por separado."
+        )
     if not detected:
         st.warning("No se identificaron apartados canónicos con contenido suficiente.")
         return
@@ -177,7 +186,8 @@ def render_detected_sections(dashboard: dict) -> None:
     rows = [
         {
             "N°": item.get("order", idx),
-            "Apartado canónico": item.get("title", "—"),
+            "Nivel": item.get("level", 1),
+            "Apartado": item.get("path") or item.get("title", "—"),
             "Detectado como": item.get("detected_as", "—"),
             "Confianza": item.get("confidence_label", "—"),
             "Palabras": item.get("words", 0),
@@ -188,6 +198,19 @@ def render_detected_sections(dashboard: dict) -> None:
     st.dataframe(rows, hide_index=True)
     total_words = sum(item.get("words", 0) for item in detected)
     st.caption(f"Total clasificado en apartados: **{total_words:,}** palabras en **{len(detected)}** bloques.")
+
+    if tree:
+        with st.expander("Árbol jerárquico (capítulos → secciones)", expanded=thesis_type == "compendio"):
+            for node in tree:
+                st.markdown(f"**{node.get('title')}** — {node.get('words', 0):,} palabras")
+                children = node.get("children") or []
+                if not children:
+                    st.caption("Sin secciones mayores detectadas dentro del capítulo.")
+                    continue
+                for child in children:
+                    st.markdown(
+                        f"- {child.get('title')} ({child.get('words', 0):,} palabras)"
+                    )
 
 
 def render_structure_confirmation(sections: list[dict], structure_source: str = "") -> dict | None:
@@ -221,12 +244,17 @@ def render_structure_confirmation(sections: list[dict], structure_source: str = 
         if structure_source:
             source_label = {
                 "index": "índice del documento",
-                "capitulos": "capítulos del cuerpo del documento",
+                "capitulos": "capítulos del cuerpo (tesis por compendio)",
                 "headings": "encabezados del cuerpo",
                 "confirmed": "confirmación previa",
                 "manual": "estructura manual",
             }.get(structure_source, structure_source)
             st.caption(f"Fuente de detección: **{source_label}**.")
+            if structure_source == "capitulos":
+                st.info(
+                    "Se detectó una **tesis por capítulos**. "
+                    "La tabla muestra capítulos (nivel 1), no subtítulos sueltos."
+                )
 
         summary = structure_confidence_summary(sections)
         if not sections:

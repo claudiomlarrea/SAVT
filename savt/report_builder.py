@@ -468,6 +468,7 @@ def build_dashboard(report: AuditReport, parsed: dict, extras: dict) -> dict:
         warnings_list,
         bool(report.metadata.get("objectives"))
         or objectives_headings_present(parsed.get("body", "")),
+        thesis_type=str(parsed.get("thesis_type") or "clasica"),
     )
     checklist = build_submission_checklist(chapter_reviews)
     readiness = checklist["status"]
@@ -536,6 +537,8 @@ def build_dashboard(report: AuditReport, parsed: dict, extras: dict) -> dict:
         "originality_dashboard": extras.get("originality_dashboard") or {},
         "pipeline": report.metadata.get("pipeline") or parsed.get("pipeline") or [],
         "structure_source": parsed.get("structure_source", "headings"),
+        "thesis_type": parsed.get("thesis_type") or "clasica",
+        "structure_tree": parsed.get("structure_tree") or [],
     }
 
 

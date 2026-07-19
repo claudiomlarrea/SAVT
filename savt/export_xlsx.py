@@ -103,14 +103,47 @@ def build_report_xlsx(report: AuditReport, dashboard: dict) -> bytes:
     detected_rows = [
         {
             "Orden": s.get("order", ""),
-            "Apartado canónico": s.get("title", ""),
+            "Nivel": s.get("level", 1),
+            "Apartado": s.get("path") or s.get("title", ""),
             "Detectado como": s.get("detected_as", ""),
+            "Confianza": s.get("confidence_label", ""),
             "Palabras": s.get("words", 0),
             "% del cuerpo": s.get("percent_label", ""),
         }
         for s in detected
     ]
     _write_sheet_from_rows(ws_detected, detected_rows, "Apartados detectados en el documento")
+
+    tree = dashboard.get("structure_tree") or []
+    if tree:
+        ws_tree = wb.create_sheet("Árbol jerárquico")
+        tree_rows = []
+        order = 0
+        for node in tree:
+            order += 1
+            tree_rows.append(
+                {
+                    "Orden": order,
+                    "Nivel": 1,
+                    "Capítulo": node.get("chapter_num", ""),
+                    "Título": node.get("title", ""),
+                    "Rol": node.get("role", ""),
+                    "Palabras": node.get("words", 0),
+                }
+            )
+            for child in node.get("children") or []:
+                order += 1
+                tree_rows.append(
+                    {
+                        "Orden": order,
+                        "Nivel": 2,
+                        "Capítulo": node.get("chapter_num", ""),
+                        "Título": f"  {child.get('title', '')}",
+                        "Rol": child.get("role", ""),
+                        "Palabras": child.get("words", 0),
+                    }
+                )
+        _write_sheet_from_rows(ws_tree, tree_rows, "Jerarquía capítulos → secciones")
 
     # --- Auditoría por apartado ---
     section_audits = dashboard.get("section_audits") or []

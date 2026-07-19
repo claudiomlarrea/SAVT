@@ -128,6 +128,10 @@ def run_document_pipeline(
         section_meta = index_layout["section_meta"]
         index_sections = index_layout["index_sections"]
         structure_source = index_layout.get("structure_source") or "index"
+        structure_tree = index_layout.get("structure_tree") or []
+        thesis_type = index_layout.get("thesis_type") or (
+            "compendio" if structure_source == "capitulos" else "clasica"
+        )
         if not bib_text.strip():
             from savt.parser import split_body_and_bibliography
 
@@ -137,7 +141,7 @@ def run_document_pipeline(
                 bib_text = split_bib
         step2_status = "ok"
         step2_summary = (
-            "Apartados por capítulos del documento"
+            "Apartados por capítulos del documento (árbol jerárquico)"
             if structure_source == "capitulos"
             else "Apartados del índice aplicados al documento"
         )
@@ -145,12 +149,15 @@ def run_document_pipeline(
         from savt.parser import remove_index_duplicate, split_body_and_bibliography
         from savt.pdf_parser import remove_pdf_front_matter
         from savt.section_resolver import build_enriched_section_map
+        from savt.structure_tree import detect_thesis_type
 
         body_raw, bib_text = split_body_and_bibliography(full_text)
         body = remove_pdf_front_matter(body_raw) if page_texts else remove_index_duplicate(body_raw)
         section_map, section_meta = build_enriched_section_map(body)
         index_sections = []
         structure_source = "headings"
+        structure_tree = []
+        thesis_type = detect_thesis_type(full_text, structure_source=structure_source)
         body_words_preview = count_words(body)
         step2_status = "warning" if body_words_preview > 8000 and len(section_map) <= 1 else "ok"
         step2_summary = "Apartados detectados por encabezados del documento"
@@ -232,5 +239,7 @@ def run_document_pipeline(
         "index_sections": index_sections,
         "index_entries": index_entries,
         "structure_source": structure_source,
+        "structure_tree": structure_tree,
+        "thesis_type": thesis_type,
         "index_layout": index_layout,
     }

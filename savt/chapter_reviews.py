@@ -490,6 +490,8 @@ def build_chapter_reviews(
     bib_dashboard: dict,
     warnings_list: list[dict],
     has_objectives: bool,
+    *,
+    thesis_type: str = "clasica",
 ) -> list[dict]:
     intro = _review_from_checks(
         "introduccion",
@@ -544,7 +546,7 @@ def build_chapter_reviews(
 
     bibliografia = build_bibliography_review(bib_dashboard, warnings_list)
 
-    return [
+    reviews = [
         intro,
         objectives,
         marco,
@@ -554,6 +556,59 @@ def build_chapter_reviews(
         conclusiones,
         bibliografia,
     ]
+
+    if thesis_type == "compendio":
+        reviews = _soften_reviews_for_compendium(reviews, has_objectives=obj_ok)
+
+    return reviews
+
+
+def _soften_reviews_for_compendium(reviews: list[dict], *, has_objectives: bool) -> list[dict]:
+    """
+    En tesis por capítulos/artículos no exigir el molde monográfico global
+    (una sola intro con pregunta, un solo marco, conclusiones que respondan la pregunta).
+    """
+    softened: list[dict] = []
+    for review in reviews:
+        item = dict(review)
+        key = item.get("key")
+        if key == "introduccion" and item.get("status") == "fail" and has_objectives:
+            item["status"] = "partial"
+            item["ok"] = False
+            item["partial"] = True
+            item["summary"] = (
+                "Tesis por capítulos: la introducción y el planteamiento pueden estar "
+                "distribuidos entre capítulos. Se detectaron objetivos; revise el Cap. III "
+                "y las introducciones de cada artículo."
+            )
+            item["how_to_fix"] = (
+                "En tesis por compendio, asegure que el capítulo de planteamiento/objetivos "
+                "exprese el problema y que cada artículo empírico tenga su propia introducción."
+            )
+        elif key == "marco_teorico" and item.get("status") == "fail":
+            item["status"] = "partial"
+            item["ok"] = False
+            item["partial"] = True
+            item["summary"] = (
+                "Tesis por capítulos: el marco teórico suele estar en Cap. I–II (revisión). "
+                "No se exige un único capítulo titulado «Marco teórico»."
+            )
+            item["how_to_fix"] = (
+                "Verifique que los capítulos de revisión cubran el estado del arte "
+                "vinculado a los objetivos del Cap. III."
+            )
+        elif key == "conclusiones" and item.get("status") in {"fail", "partial"}:
+            # La respuesta a la pregunta puede estar en la discusión del artículo empírico
+            if item.get("status") == "fail":
+                item["status"] = "partial"
+                item["partial"] = True
+                item["ok"] = False
+            item["summary"] = (
+                "Tesis por capítulos: las conclusiones pueden estar en cada artículo "
+                "(discusión/conclusión del Cap. empírico) además de un cierre global."
+            )
+        softened.append(item)
+    return softened
 
 
 def checklist_status_from_reviews(reviews: list[dict]) -> str:

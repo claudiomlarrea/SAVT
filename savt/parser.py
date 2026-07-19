@@ -638,7 +638,7 @@ _OBJ_END_LOOKAHEAD = (
     r"(?="
     r"\n\s*(?:\d+(?:\.\d+)*\.?\s*)?"
     r"(?:Supuestos|Hipótesis|Hipotesis|CAPÍTULO|CAPITULO|SEGUNDA|TERCERA|CUARTA|QUINTA|"
-    r"METODOLOG|MATERIALES|MARCO TE[OÓ]RICO|RESULTADOS|DISCUSI[ÓO]N(?:ES)?|PARTE\s+[-–])"
+    r"METODOLOG|MATERIALES|MARCO TE[OÓ]RICO|RESULTADOS|DISCUSI[ÓO]NES?|PARTE\s+[-–])"
     r"|\Z)"
 )
 _BULLET_CHARS = r"[➤►•●○▪\u25b8\u25ba\u25cf\u25cb\u25aa\u2022\uf0d8\uf0b7\uf076]"
@@ -785,7 +785,7 @@ def extract_conclusions(body: str) -> str:
 
     inline_matches = list(
         re.finditer(
-            r"(?im)(?:^|\n)\s*CONCLUSI[ÓO]N(?:ES)?(?:\s+GENERALES|\s+FINALES)?\b\s*",
+            r"(?im)(?:^|\n)\s*CONCLUSIONES(?:\s+GENERALES|\s+FINALES)?\b\s*",
             scope,
         )
     )
@@ -913,6 +913,8 @@ def parse_thesis_file(source: BinaryIO | str, filename: str = "tesis.docx") -> d
         "section_meta": section_meta,
         "index_sections": pipeline["index_sections"],
         "structure_source": pipeline["structure_source"],
+        "structure_tree": pipeline.get("structure_tree") or [],
+        "thesis_type": pipeline.get("thesis_type") or "clasica",
         "pipeline": pipeline["steps"],
         "cited_numbers": cited_numbers,
         "cited_keys": cited_keys,
