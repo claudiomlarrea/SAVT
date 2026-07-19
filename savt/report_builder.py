@@ -505,8 +505,16 @@ def build_dashboard(report: AuditReport, parsed: dict, extras: dict) -> dict:
     critical_findings = build_critical_findings_summary(warnings_list)
 
     from savt.document_model import ensure_document_model
+    from savt.word_stats import count_words
 
     document_model = ensure_document_model(parsed)
+    canonical_words = {
+        role: count_words(text or "")
+        for role, text in (parsed.get("section_map") or {}).items()
+        if text
+    }
+    if parsed.get("bibliography_word_count"):
+        canonical_words["bibliografia"] = int(parsed["bibliography_word_count"])
 
     return {
         "icai": report.score,
@@ -544,6 +552,7 @@ def build_dashboard(report: AuditReport, parsed: dict, extras: dict) -> dict:
         "thesis_type": parsed.get("thesis_type") or "clasica",
         "structure_tree": parsed.get("structure_tree") or [],
         "document_model": document_model,
+        "canonical_words": canonical_words,
     }
 
 
