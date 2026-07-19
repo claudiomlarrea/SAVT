@@ -132,6 +132,13 @@ def inject_branding() -> None:
             color: #ffffff !important;
         }}
 
+        .stButton > button[kind="primary"]:not(:disabled),
+        .stButton > button[data-testid="stBaseButton-primary"]:not(:disabled),
+        button[kind="primary"]:not(:disabled),
+        button[data-testid="stBaseButton-primary"]:not(:disabled) {{
+            cursor: pointer !important;
+        }}
+
         .stDownloadButton > button {{
             border-color: {UCCUYO_GREEN};
             color: {UCCUYO_GREEN};

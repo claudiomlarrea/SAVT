@@ -577,32 +577,41 @@ def render_structure_confirmation(sections: list[dict], structure_source: str = 
         c1, c2, c3 = st.columns(3)
         with c1:
             if st.button("Cargar plantilla canónica", key="btn_tpl_canonical"):
+                st.session_state["manual_outline_area"] = CANONICAL_TEMPLATE_OUTLINE
                 st.session_state["manual_outline_text"] = CANONICAL_TEMPLATE_OUTLINE
                 st.rerun()
         with c2:
             if st.button("Limpiar pegado de PDF", key="btn_tpl_clean_pdf"):
                 from savt.structure_confirm import clean_pasted_toc
 
-                raw = st.session_state.get("manual_outline_text") or st.session_state.get(
-                    "manual_outline_area", ""
+                raw = st.session_state.get("manual_outline_area") or st.session_state.get(
+                    "manual_outline_text", ""
                 )
-                st.session_state["manual_outline_text"] = clean_pasted_toc(raw, major_only=True)
+                cleaned = clean_pasted_toc(raw, major_only=True)
+                st.session_state["manual_outline_area"] = cleaned
+                st.session_state["manual_outline_text"] = cleaned
                 st.rerun()
         with c3:
             if st.button("Vaciar", key="btn_tpl_clear"):
+                st.session_state["manual_outline_area"] = ""
                 st.session_state["manual_outline_text"] = ""
                 st.rerun()
 
+        # Solo key (sin value=): evita desfase Streamlit que deja el botón “prohibido”
+        # mientras el texto ya se ve en pantalla.
+        if "manual_outline_area" not in st.session_state:
+            st.session_state["manual_outline_area"] = st.session_state.get("manual_outline_text", "")
+
         outline_text = st.text_area(
             "Índice / capítulos",
-            value=st.session_state.get("manual_outline_text", ""),
             height=280,
             placeholder=MANUAL_OUTLINE_PLACEHOLDER,
             key="manual_outline_area",
         )
-        st.session_state["manual_outline_text"] = outline_text
+        st.session_state["manual_outline_text"] = outline_text or ""
 
-        parsed_entries = parse_manual_outline(outline_text)
+        parsed_entries = parse_manual_outline(outline_text or "")
+        edited_manual = None
         if parsed_entries:
             import pandas as pd
 
@@ -642,24 +651,49 @@ def render_structure_confirmation(sections: list[dict], structure_source: str = 
                     "Pulse **Limpiar pegado de PDF** o deje solo 8–15 apartados principales "
                     "para un mejor resultado."
                 )
+        elif (outline_text or "").strip():
+            st.warning(
+                "El texto pegado no se pudo interpretar como títulos. "
+                "Pruebe **Limpiar pegado de PDF** o deje un título por línea "
+                "(ej. CAPÍTULO I, MÉTODOS, RESULTADOS)."
+            )
         else:
-            edited_manual = None
             st.info(
-                "Pegue al menos 3–4 títulos principales "
+                "Pegue al menos 2 títulos principales "
                 "(por ejemplo CAPÍTULO I, MÉTODOS, RESULTADOS, DISCUSIÓN, REFERENCIAS)."
             )
 
+        # Siempre habilitado: validamos al hacer clic (el cursor 🚫 confundía al usuario).
         confirm_manual = st.button(
             "Localizar títulos y auditar con mi estructura",
             type="primary",
             key="btn_manual_confirm",
-            disabled=not parsed_entries,
         )
-        if confirm_manual and edited_manual is not None:
+        if confirm_manual:
             from savt.structure_confirm import label_to_role
 
+            raw_now = (
+                st.session_state.get("manual_outline_area")
+                or st.session_state.get("manual_outline_text")
+                or outline_text
+                or ""
+            )
             entries = []
-            for row in edited_manual.to_dict("records"):
+            source_rows = None
+            if edited_manual is not None:
+                source_rows = edited_manual.to_dict("records")
+            else:
+                fallback = parse_manual_outline(raw_now)
+                source_rows = [
+                    {
+                        "Incluir": e.get("include", True),
+                        "Título en el documento": e.get("title", ""),
+                        "Apartado canónico": ROLE_LABELS.get(e.get("role", "otros"), ROLE_LABELS["otros"]),
+                    }
+                    for e in fallback
+                ]
+
+            for row in source_rows or []:
                 title = str(row.get("Título en el documento") or "").strip()
                 if not title:
                     continue
@@ -672,7 +706,9 @@ def render_structure_confirmation(sections: list[dict], structure_source: str = 
                     }
                 )
             if len(entries) < 2:
-                st.error("Ingrese al menos dos títulos válidos.")
+                st.error(
+                    "Ingrese al menos dos títulos válidos (uno por línea) y vuelva a pulsar el botón."
+                )
             else:
                 return {"mode": "manual", "entries": entries}
 
