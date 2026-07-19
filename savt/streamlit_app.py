@@ -242,16 +242,17 @@ def render_document_chapters(dashboard: dict) -> None:
 
 
 def render_evaluation_checklist(dashboard: dict) -> None:
-    """2) Checklist canónico de evaluación (como en el Excel)."""
+    """2) Checklist compacto (una sola vez)."""
     checklist = dashboard.get("checklist") or {}
     items = checklist.get("items") or []
+    reviews = {r.get("key"): r for r in (dashboard.get("chapter_reviews") or [])}
 
     st.markdown("## 2. Checklist de evaluación")
     st.caption(
-        "Estado de los apartados académicos estándar (Introducción, Objetivos, Marco teórico, "
-        "Metodología, Resultados, Discusión, Conclusiones, Bibliografía)."
+        "Estado de los apartados académicos: Introducción, Objetivos, Marco teórico, "
+        "Metodología, Resultados, Discusión, Conclusiones, Bibliografía."
     )
-    st.markdown(f"**Estado general del checklist:** {checklist.get('status', '—')}")
+    st.markdown(f"**Estado general:** {checklist.get('status', '—')}")
 
     if not items:
         st.info("No hay checklist disponible.")
@@ -259,29 +260,34 @@ def render_evaluation_checklist(dashboard: dict) -> None:
 
     rows = []
     for item in items:
+        key = item.get("section_key") or ""
+        review = reviews.get(key) or {}
+        title = review.get("title") or (item.get("label") or "—").split(" — ")[0].replace(" completo", "")
         if item.get("ok"):
             estado = "Completo"
         elif item.get("partial"):
             estado = "Revisión parcial"
         else:
             estado = "Requiere revisión"
-        # Label Excel-style already includes the phrase; show clean title + estado
-        label = item.get("label") or "—"
-        rows.append({"Apartado": label, "Estado": estado})
+        rows.append({"Apartado": title, "Estado": estado})
 
     st.dataframe(rows, hide_index=True, use_container_width=True)
 
 
 def render_canonical_apartados(dashboard: dict) -> None:
-    """3) Apartados canónicos con palabras + estado + resumen."""
+    """3) Tabla canónica + detalle solo de lo que hay que corregir."""
     reviews = dashboard.get("chapter_reviews") or []
     words_map = _words_by_canonical_role(dashboard)
-    body_total = max(sum(words_map.values()) or int((dashboard.get("document_model") or {}).get("document", {}).get("word_count") or 0), 1)
+    body_total = max(
+        sum(words_map.values())
+        or int((dashboard.get("document_model") or {}).get("document", {}).get("word_count") or 0),
+        1,
+    )
 
-    st.markdown("## 3. Apartados de evaluación (canónicos)")
+    st.markdown("## 3. Apartados de evaluación")
     st.caption(
-        "Además de los capítulos del PDF, SAVT evalúa estos apartados académicos. "
-        "Aquí ve el estado y un resumen de cada uno."
+        "Los mismos apartados del checklist, con palabras y un resumen corto. "
+        "El detalle de corrección aparece solo donde hace falta revisar."
     )
 
     if not reviews:
@@ -289,6 +295,7 @@ def render_canonical_apartados(dashboard: dict) -> None:
         return
 
     rows = []
+    pending = []
     for review in reviews:
         key = review.get("key") or ""
         words = int(words_map.get(key) or 0)
@@ -299,15 +306,22 @@ def render_canonical_apartados(dashboard: dict) -> None:
                 "Estado": _review_status_label(review),
                 "Palabras": words if words else "—",
                 "% aprox.": f"{pct:.1f}%" if words else "—",
-                "Resumen": (review.get("summary") or "")[:220],
+                "Resumen": (review.get("summary") or "")[:180],
             }
         )
+        if not review.get("ok"):
+            pending.append(review)
+
     st.dataframe(rows, hide_index=True, use_container_width=True)
 
-    st.markdown("### Detalle por apartado")
-    for review in reviews:
+    if not pending:
+        st.success("Todos los apartados evaluados están completos según la detección automática.")
+        return
+
+    st.markdown("### Qué revisar y cómo corregir")
+    for review in pending:
         status = _review_status_label(review)
-        with st.expander(f"{review.get('title')} — {status}", expanded=not review.get("ok")):
+        with st.expander(f"{review.get('title')} — {status}", expanded=True):
             if review.get("summary"):
                 st.write(review["summary"])
             if review.get("why"):
@@ -316,84 +330,28 @@ def render_canonical_apartados(dashboard: dict) -> None:
                 st.info(f"**Cómo corregir:** {review['how_to_fix']}")
 
 
-def render_excel_sheet_summaries(dashboard: dict, report) -> None:
-    """4) Resúmenes de cada hoja del Excel en pantalla principal."""
-    st.markdown("## 4. Resúmenes del informe (equivalente al Excel)")
-    st.caption(
-        "Muchos usuarios no abren el Excel. Aquí tiene un resumen de cada hoja del informe exportable."
-    )
+def render_priority_findings(dashboard: dict) -> None:
+    """Hallazgos prioritarios (una sola vez; no repetir checklist)."""
+    warnings = dashboard.get("warnings_list") or []
+    st.markdown("## 4. Hallazgos prioritarios")
+    st.caption("Alertas concretas a corregir antes de presentar (no repite el checklist).")
+    if not warnings:
+        st.success("No hay advertencias prioritarias listadas.")
+        return
+    for idx, item in enumerate(warnings[:10], start=1):
+        st.markdown(f"**{idx}. {item.get('title', 'Hallazgo')}**")
+        st.caption(item.get("gravity") or "")
+        detail = item.get("detail")
+        if detail:
+            st.write(str(detail)[:350])
 
-    # Resumen general
-    with st.expander("Hoja · Resumen general", expanded=True):
-        c1, c2, c3 = st.columns(3)
-        c1.metric("ICAI", f"{dashboard.get('icai', '—')}/100")
-        c2.metric("Estado", dashboard.get("readiness") or "—")
-        c3.metric("Perfil", dashboard.get("profile_label") or "—")
-        st.write(dashboard.get("icai_interpretation") or "")
-        st.markdown(f"**Motivo principal:** {dashboard.get('main_reason') or '—'}")
 
-    # Capítulos (sin re-renderizar H2)
-    with st.expander("Hoja · Apartados / capítulos detectados", expanded=False):
-        model = dashboard.get("document_model") or {}
-        chapters = model.get("chapters") or dashboard.get("detected_sections") or []
-        if not chapters:
-            st.caption("Sin capítulos detectados.")
-        else:
-            rows = []
-            if model.get("chapters"):
-                total = max(sum(int(c.get("words") or 0) for c in model["chapters"]), 1)
-                for idx, chapter in enumerate(model["chapters"], start=1):
-                    words = int(chapter.get("words") or 0)
-                    rows.append(
-                        {
-                            "N°": idx,
-                            "Capítulo": chapter.get("title"),
-                            "Palabras": words,
-                            "%": f"{round(words * 100 / total, 1):.1f}%",
-                        }
-                    )
-            else:
-                for idx, item in enumerate(chapters, start=1):
-                    rows.append(
-                        {
-                            "N°": idx,
-                            "Capítulo": item.get("detected_as") or item.get("title"),
-                            "Palabras": item.get("words", 0),
-                            "%": item.get("percent_label", "—"),
-                        }
-                    )
-            st.dataframe(rows, hide_index=True, use_container_width=True)
+def render_extra_evidence(dashboard: dict) -> None:
+    """Detalle adicional único: citas, profundidad, bibliografía numérica."""
+    st.markdown("## 5. Evidencia adicional")
+    st.caption("Información que no está arriba: citas, profundidad y datos de bibliografía.")
 
-    tree = dashboard.get("structure_tree") or []
-    with st.expander("Hoja · Árbol jerárquico", expanded=False):
-        if not tree:
-            st.caption("Sin árbol jerárquico.")
-        else:
-            for node in tree:
-                st.markdown(f"**{node.get('title')}** ({int(node.get('words') or 0):,} palabras)")
-                for child in node.get("children") or []:
-                    st.markdown(
-                        f"- {child.get('title')} ({int(child.get('words') or 0):,} palabras)"
-                    )
-
-    with st.expander("Hoja · Profundidad académica / auditoría por apartado", expanded=False):
-        depth = (dashboard.get("content_dashboard") or {}).get("section_depth") or []
-        if depth:
-            rows = [
-                {
-                    "Apartado": d.get("title") or d.get("detected_as") or d.get("role") or "—",
-                    "Palabras": d.get("words", 0),
-                    "Profundidad": d.get("depth_status_label") or d.get("depth_status") or "—",
-                    "Motivo": (d.get("reason") or d.get("motivo") or "")[:160],
-                }
-                for d in depth
-                if int(d.get("words") or 0) > 0 or d.get("depth_status") not in {None, "missing"}
-            ]
-            st.dataframe(rows, hide_index=True, use_container_width=True) if rows else st.caption("Sin filas.")
-        else:
-            st.caption("Sin datos de profundidad académica.")
-
-    with st.expander("Hoja · Cuadre de citas y referencias", expanded=False):
+    with st.expander("Cuadre de citas y referencias", expanded=False):
         recon = dashboard.get("citation_reconciliation") or {}
         rows = recon.get("reconciliation_rows") or []
         if rows:
@@ -403,46 +361,41 @@ def render_excel_sheet_summaries(dashboard: dict, report) -> None:
         if not rows and not recon.get("notes"):
             st.caption("Sin cuadre de citas disponible.")
 
-    with st.expander("Hoja · Checklist y revisión por capítulo", expanded=False):
-        for item in (dashboard.get("checklist") or {}).get("items") or []:
-            st.markdown(f"- {item.get('label')}")
-        st.markdown("---")
-        for review in dashboard.get("chapter_reviews") or []:
-            st.markdown(
-                f"**{review.get('title')}** — {_review_status_label(review)}  \n"
-                f"{(review.get('summary') or '')[:280]}"
-            )
-
-    with st.expander("Hoja · Hallazgos prioritarios", expanded=True):
-        warnings = dashboard.get("warnings_list") or []
-        if not warnings:
-            st.success("No hay advertencias prioritarias listadas.")
+    with st.expander("Profundidad académica", expanded=False):
+        depth = (dashboard.get("content_dashboard") or {}).get("section_depth") or []
+        rows = [
+            {
+                "Apartado": d.get("title") or d.get("detected_as") or d.get("role") or "—",
+                "Palabras": d.get("words", 0),
+                "Profundidad": d.get("depth_status_label") or d.get("depth_status") or "—",
+                "Motivo": (d.get("reason") or d.get("motivo") or "")[:160],
+            }
+            for d in depth
+            if int(d.get("words") or 0) > 0 or d.get("depth_status") not in {None, "missing"}
+        ]
+        if rows:
+            st.dataframe(rows, hide_index=True, use_container_width=True)
         else:
-            for idx, item in enumerate(warnings[:12], start=1):
-                st.markdown(f"**{idx}. {item.get('title', 'Hallazgo')}**")
-                st.caption(item.get("gravity") or "")
-                if item.get("detail"):
-                    st.write(str(item["detail"])[:400])
+            st.caption("Sin datos de profundidad.")
 
-    with st.expander("Hoja · Bibliografía (resumen)", expanded=False):
+    with st.expander("Bibliografía (cifras)", expanded=False):
         bib = dashboard.get("bibliography_dashboard") or {}
         details = bib.get("details") or {}
+        total = bib.get("total") or details.get("total") or bib.get("entry_count") or "—"
         st.write(
-            f"Estilo: **{bib.get('style') or details.get('style') or '—'}** · "
-            f"Entradas: **{bib.get('total') or details.get('total') or bib.get('entry_count') or '—'}**"
+            f"Estilo: **{bib.get('style') or details.get('style') or 'APA'}** · "
+            f"Entradas detectadas: **{total}**"
         )
         for review in dashboard.get("chapter_reviews") or []:
             if review.get("key") == "bibliografia":
-                if review.get("summary"):
-                    st.warning(review["summary"])
                 for issue in review.get("issues") or []:
                     st.markdown(f"- {issue}")
 
 
 def render_executive_report(dashboard: dict, report, base_name: str) -> None:
     """
-    Pantalla principal orientada al usuario evaluador:
-    1) Capítulos  2) Checklist  3) Apartados canónicos  4) Resúmenes tipo Excel
+    Pantalla principal sin redundancia:
+    resultado → capítulos → checklist → apartados → hallazgos → evidencia → descargas.
     """
     st.markdown("## Resultado de la auditoría")
     left, right = st.columns([1, 1.2])
@@ -460,6 +413,8 @@ def render_executive_report(dashboard: dict, report, base_name: str) -> None:
         )
         st.markdown(f"**{dashboard.get('readiness') or '—'}**")
         st.markdown(f"**Motivo principal:** {dashboard.get('main_reason') or '—'}")
+        if dashboard.get("profile_label"):
+            st.caption(f"Perfil: {dashboard.get('profile_label')}")
 
     st.divider()
     render_document_chapters(dashboard)
@@ -468,15 +423,16 @@ def render_executive_report(dashboard: dict, report, base_name: str) -> None:
     st.divider()
     render_canonical_apartados(dashboard)
     st.divider()
-    render_excel_sheet_summaries(dashboard, report)
+    render_priority_findings(dashboard)
+    st.divider()
+    render_extra_evidence(dashboard)
     st.divider()
 
-    with st.expander("Detalle técnico adicional (integridad, ética, originalidad, jurado)", expanded=False):
+    with st.expander("Integridad, ética, originalidad y jurado", expanded=False):
         render_integrity(dashboard)
         render_ethics(dashboard)
         render_originality(dashboard)
         render_jury(dashboard)
-        render_technical_section_detail(dashboard)
 
     st.divider()
     render_final_report(report, dashboard, base_name)
@@ -1204,10 +1160,10 @@ def render_final_report(report, dashboard: dict, base_name: str) -> None:
     from savt.export_xlsx import build_report_xlsx
     from savt.report_builder import findings_dataframe_rows
 
-    st.markdown("## Informe final SAVT")
+    st.markdown("## Descargar informe")
     st.caption(
-        "Descargue el informe completo en Excel o Word, el JSON estructurado del documento "
-        "(contrato interno), o explore el detalle tabular de hallazgos."
+        "Excel, Word o JSON para archivo. La pantalla de arriba ya muestra lo esencial; "
+        "no hace falta abrir el Excel para entender el resultado."
     )
     render_findings_table(report)
 
