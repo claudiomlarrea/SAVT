@@ -244,10 +244,10 @@ def build_citation_reconciliation(
             union_numbered |= unique_set  # type: ignore[arg-type]
         section_rows.append(
             {
-                "role": role,
                 "Apartado": label,
                 "Apariciones cita": occurrences,
                 "N° refs distintos": unique_count,
+                "Tipo": "Apartado",
             }
         )
 
@@ -271,19 +271,19 @@ def build_citation_reconciliation(
             "Apartado": "Σ Suma apartados (cuerpo)",
             "Apariciones cita": sum_occurrences,
             "N° refs distintos": union_unique,
-            "is_total": True,
+            "Tipo": "Total / resumen",
         },
         {
             "Apartado": "Documento — cuerpo completo",
             "Apariciones cita": body_occurrences,
             "N° refs distintos": document_unique,
-            "is_total": True,
+            "Tipo": "Total / resumen",
         },
         {
             "Apartado": "Bibliografía — entradas detectadas",
             "Apariciones cita": "—",
             "N° refs distintos": total_refs,
-            "is_total": True,
+            "Tipo": "Total / resumen",
         },
     ]
 
