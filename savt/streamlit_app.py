@@ -311,16 +311,27 @@ def render_structure_confirmation(sections: list[dict], structure_source: str = 
     with tab_manual:
         st.markdown("### Pegue su tabla de contenido")
         st.caption(
-            "Un título por línea. Puede indicar el rol canónico con `|` "
-            "(metodologia, resultados, discusion, objetivos, marco_teorico, …)."
+            "Un título por línea. Si pega desde el PDF, use **Limpiar pegado de PDF** "
+            "(une líneas partidas y quita números de página). Mejor aún: deje solo "
+            "capítulos y apartados principales. Opcional: rol con `|` "
+            "(metodologia, resultados, discusion, …)."
         )
-        c1, c2 = st.columns(2)
+        c1, c2, c3 = st.columns(3)
         with c1:
             if st.button("Cargar plantilla canónica", key="btn_tpl_canonical"):
                 st.session_state["manual_outline_text"] = CANONICAL_TEMPLATE_OUTLINE
                 st.rerun()
         with c2:
-            if st.button("Limpiar", key="btn_tpl_clear"):
+            if st.button("Limpiar pegado de PDF", key="btn_tpl_clean_pdf"):
+                from savt.structure_confirm import clean_pasted_toc
+
+                raw = st.session_state.get("manual_outline_text") or st.session_state.get(
+                    "manual_outline_area", ""
+                )
+                st.session_state["manual_outline_text"] = clean_pasted_toc(raw, major_only=True)
+                st.rerun()
+        with c3:
+            if st.button("Vaciar", key="btn_tpl_clear"):
                 st.session_state["manual_outline_text"] = ""
                 st.rerun()
 
@@ -363,10 +374,22 @@ def render_structure_confirmation(sections: list[dict], structure_source: str = 
                 use_container_width=True,
                 key="manual_outline_editor",
             )
-            st.caption(f"{len(edited_manual)} entradas listas. SAVT buscará cada título en el PDF y cortará los bloques.")
+            n_entries = len(edited_manual)
+            st.caption(
+                f"{n_entries} entradas listas. SAVT buscará cada título en el PDF y cortará los bloques."
+            )
+            if n_entries > 25:
+                st.warning(
+                    "Hay muchas entradas (típico al pegar el índice completo del PDF). "
+                    "Pulse **Limpiar pegado de PDF** o deje solo 8–15 apartados principales "
+                    "para un mejor resultado."
+                )
         else:
             edited_manual = None
-            st.info("Pegue al menos 3–4 títulos de su índice (por ejemplo CAPÍTULO I, MÉTODOS, RESULTADOS…).")
+            st.info(
+                "Pegue al menos 3–4 títulos principales "
+                "(por ejemplo CAPÍTULO I, MÉTODOS, RESULTADOS, DISCUSIÓN, REFERENCIAS)."
+            )
 
         confirm_manual = st.button(
             "Localizar títulos y auditar con mi estructura",
@@ -1056,8 +1079,10 @@ def _run_app() -> None:
 
     parsed = st.session_state.get("parsed_doc")
     detected = st.session_state.get("detected_sections")
+    has_report = bool(st.session_state.get("report"))
 
-    if parsed is None or detected is None:
+    # Si hay informe, no exigir de nuevo la detección (evita volver al paso 1 tras auditar).
+    if (parsed is None or detected is None) and not has_report:
         if st.button("1. Detectar estructura", type="primary"):
             with st.spinner("Extrayendo texto y localizando apartados…"):
                 from savt.audit import prepare_document
@@ -1083,14 +1108,15 @@ def _run_app() -> None:
     structure_choice = None
     if not st.session_state.get("report"):
         structure_choice = render_structure_confirmation(
-            detected,
-            structure_source=str(parsed.get("structure_source") or ""),
+            detected or [],
+            structure_source=str((parsed or {}).get("structure_source") or ""),
         )
         if structure_choice is None:
             st.divider()
             render_user_feedback(context={"filename": uploaded.name})
             return
 
+        from savt.section_audit import detect_document_sections
         from savt.structure_confirm import apply_manual_outline, apply_section_overrides
 
         if structure_choice.get("mode") == "manual":
@@ -1106,14 +1132,18 @@ def _run_app() -> None:
             if found < 2:
                 st.error(
                     "Con la estructura manual solo se localizaron menos de 2 apartados en el texto. "
-                    "Ajuste los títulos para que coincidan con el PDF y reintente."
+                    "Use **Limpiar pegado de PDF**, deje solo capítulos/apartados principales "
+                    "(CAPÍTULO I, MÉTODOS, RESULTADOS…) y reintente."
                 )
                 st.divider()
                 render_user_feedback(context={"filename": uploaded.name})
                 return
-            st.session_state["detected_sections"] = None  # se regenera en auditoría
+            # Mantener detected_sections actualizado (no None): si queda None, un rerun
+            # vuelve incorrectamente a «1. Detectar estructura».
+            st.session_state["detected_sections"] = detect_document_sections(parsed)
         else:
             parsed = apply_section_overrides(parsed, structure_choice.get("overrides") or [])
+            st.session_state["detected_sections"] = detect_document_sections(parsed)
         st.session_state["parsed_doc"] = parsed
 
         progress_bar = st.progress(0.0)
@@ -1123,16 +1153,24 @@ def _run_app() -> None:
             progress_bar.progress(min(max(fraction, 0.0), 1.0))
             status_box.markdown(f"**{phase}** — {detail}")
 
-        with st.spinner("Auditando tesis con la estructura confirmada…"):
-            from savt.audit import run_audit_from_parsed
+        try:
+            with st.spinner("Auditando tesis con la estructura confirmada…"):
+                from savt.audit import run_audit_from_parsed
 
-            resolved = st.session_state.get("resolved_config") or config
-            report = run_audit_from_parsed(
-                parsed,
-                filename=uploaded.name,
-                config=resolved,
-                on_progress=on_progress,
-            )
+                resolved = st.session_state.get("resolved_config") or config
+                report = run_audit_from_parsed(
+                    parsed,
+                    filename=uploaded.name,
+                    config=resolved,
+                    on_progress=on_progress,
+                )
+        except Exception as exc:
+            st.error("La auditoría falló tras confirmar la estructura. Puede reintentar sin perder el PDF.")
+            st.exception(exc)
+            st.divider()
+            render_user_feedback(context={"filename": uploaded.name})
+            return
+
         progress_bar.progress(1.0)
         status_box.success("Auditoría completada.")
         try:

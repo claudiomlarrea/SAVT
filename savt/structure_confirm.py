@@ -270,22 +270,15 @@ def structure_confidence_summary(sections: list[dict]) -> dict:
 MANUAL_OUTLINE_PLACEHOLDER = """Pegue aquí el índice o la lista de apartados (un título por línea).
 Opcional: agregue el rol canónico separado por | 
 
-Ejemplo:
+Ejemplo (mejor que pegar el índice completo del PDF):
 RESUMEN | presentacion
 CAPÍTULO I: EFECTOS BENÉFICOS DE Trichoderma | marco_teorico
 CAPÍTULO II: Trichoderma virens Y PRODUCCIÓN ENZIMÁTICA | marco_teorico
 CAPÍTULO III | objetivos
 OBJETIVO GENERAL | objetivos
-OBJETIVOS ESPECÍFICOS | objetivos
-CAPÍTULO IV: CARACTERIZACIÓN DE UN NUEVO FACTOR… | introduccion
+CAPÍTULO IV: CARACTERIZACIÓN DE UN NUEVO FACTOR | introduccion
 INTRODUCCIÓN | introduccion
 MÉTODOS | metodologia
-RESULTADOS | resultados
-DISCUSIÓN | discusion
-CONCLUSIÓN | conclusiones
-REFERENCIAS | bibliografia
-CAPÍTULO V: PRODUCCIÓN DE CELULASA… | metodologia
-MATERIALES Y MÉTODOS | metodologia
 RESULTADOS | resultados
 DISCUSIÓN | discusion
 REFERENCIAS | bibliografia
@@ -339,6 +332,122 @@ def _normalize_manual_role(value: str) -> str:
     return classify_heading(value) or "otros"
 
 
+def _strip_toc_page_number(line: str) -> str:
+    """Quita número de página al final (arábigo o romano), sin romper «CAPÍTULO I»."""
+    text = line.strip()
+    if re.search(r"(?i)cap[ií]tulo\s+[ivxlcdm\d]+", text):
+        return re.sub(r"\s+\d{1,4}$", "", text).strip()
+    return re.sub(r"\s+(?:\d{1,4}|[IVXLCDM]{1,8})$", "", text).strip()
+
+
+def _is_toc_noise_title(title: str) -> bool:
+    folded = _fold_accents(title).strip().lower()
+    if not folded:
+        return True
+    if re.fullmatch(r"\d+|[ivxlcdm]+", folded):
+        return True
+    noise = {
+        "tabla de contenido",
+        "tabla de contenidos",
+        "contenido",
+        "indice",
+        "índice",
+        "index",
+        "pagina",
+        "página",
+        "paginas",
+        "páginas",
+    }
+    return folded in noise
+
+
+def _looks_like_heading_start(line: str) -> bool:
+    return bool(
+        re.match(
+            r"(?i)^(?:"
+            r"cap[ií]tulo|cap\.\s*|resumen|abstract|agradecimientos?|"
+            r"introducci[oó]n|objetivo|justificaci[oó]n|hip[oó]tesis|"
+            r"marco|metodolog|materiales|m[eé]todos|resultados|"
+            r"discusi[oó]n|conclusi[oó]n|referencias|bibliograf|"
+            r"anexos?|ap[eé]ndice|\d+(?:\.\d+)*\.?\s+[A-ZÁÉÍÓÚÑ]"
+            r")",
+            line.strip(),
+        )
+    )
+
+
+def _looks_like_line_continuation(prev: str, current: str) -> bool:
+    if not prev or not current:
+        return False
+    if _looks_like_heading_start(current):
+        return False
+    if re.fullmatch(r"\d+|[IVXLCDM]+", current.strip()):
+        return True  # página suelta → se limpia luego; no fusionar como título
+    prev_stripped = prev.rstrip()
+    if prev_stripped.endswith((":", ";", ",", "—", "-")):
+        return True
+    if re.search(r"(?i)\b(y|de|del|la|el|los|las|su|sus|un|una|para|con|en)\s*$", prev_stripped):
+        return True
+    # Línea corta en mayúsculas tras un título incompleto
+    if len(current) < 48 and current.upper() == current and not _looks_like_heading_start(current):
+        return True
+    return False
+
+
+def clean_pasted_toc(text: str, *, major_only: bool = False) -> str:
+    """
+    Normaliza un índice pegado desde PDF: une líneas partidas, quita páginas
+    y entradas de ruido (TABLA DE CONTENIDO, números sueltos).
+    """
+    if not text or not text.strip():
+        return ""
+
+    raw_lines = [ln.strip() for ln in text.splitlines()]
+    merged: list[str] = []
+    for line in raw_lines:
+        if not line or line.startswith("#"):
+            continue
+        if re.fullmatch(r"\d+|[IVXLCDM]+", line):
+            continue
+        line = re.sub(r"[.\u2026…]{2,}\s*\S+\s*$", "", line).strip()
+        probe = _strip_toc_page_number(re.sub(r"^\d+(?:\.\d+)*\.?\s+", "", line).strip())
+        if _is_toc_noise_title(probe):
+            continue
+        if merged and _looks_like_line_continuation(merged[-1], line):
+            merged[-1] = f"{merged[-1]} {line}".strip()
+        else:
+            merged.append(line)
+
+    cleaned: list[str] = []
+    for line in merged:
+        if "|" in line:
+            title_part, role_part = line.split("|", 1)
+            title = _strip_toc_page_number(title_part.strip())
+            role = role_part.strip()
+            line_out = f"{title} | {role}" if role else title
+        else:
+            # «1. INTRODUCCIÓN 2» → quitar numeración de entrada y página
+            line = re.sub(r"^\d+(?:\.\d+)*\.?\s+", "", line).strip()
+            title = _strip_toc_page_number(line)
+            line_out = title
+
+        title_only = line_out.split("|", 1)[0].strip()
+        # Si al fusionar quedó ruido al final, cortar
+        title_only = re.split(r"(?i)\s+TABLA DE CONTENIDO\b.*$", title_only)[0].strip()
+        line_out = (
+            f"{title_only} | {line_out.split('|', 1)[1].strip()}"
+            if "|" in line_out
+            else title_only
+        )
+        if len(title_only) < 3 or _is_toc_noise_title(title_only):
+            continue
+        if major_only and not _looks_like_heading_start(title_only):
+            continue
+        cleaned.append(line_out)
+
+    return "\n".join(cleaned)
+
+
 def parse_manual_outline(text: str) -> list[dict]:
     """
     Parsea líneas de índice/estructura manual.
@@ -346,21 +455,18 @@ def parse_manual_outline(text: str) -> list[dict]:
       - Título
       - Título | rol
       - 1. Título | metodologia
+    Acepta pegados imperfectos de PDF (líneas partidas / números de página).
     """
     from savt.section_resolver import classify_heading
 
     entries: list[dict] = []
-    if not text or not text.strip():
+    normalized = clean_pasted_toc(text or "")
+    if not normalized.strip():
         return entries
 
-    for raw_line in text.splitlines():
+    for raw_line in normalized.splitlines():
         line = raw_line.strip()
         if not line or line.startswith("#"):
-            continue
-        # Quitar puntos líderes de índice: «1. Título ….. 12»
-        line = re.sub(r"[.\u2026…]{2,}\s*\S+\s*$", "", line).strip()
-        line = re.sub(r"^\d+(?:\.\d+)*\.?\s+", "", line).strip()
-        if not line:
             continue
 
         if "|" in line:
@@ -370,8 +476,15 @@ def parse_manual_outline(text: str) -> list[dict]:
         else:
             title = line
             role = classify_heading(title) or "otros"
+            if role == "otros":
+                if re.match(r"(?i)^cap[ií]tulo\b", title):
+                    role = "marco_teorico"
+                elif re.match(r"(?i)^(?:referencias|bibliograf)", title):
+                    role = "bibliografia"
+                elif re.match(r"(?i)^agradecimientos?\b", title):
+                    role = "omitir"
 
-        if len(title) < 3:
+        if len(title) < 3 or _is_toc_noise_title(title):
             continue
         entries.append(
             {
