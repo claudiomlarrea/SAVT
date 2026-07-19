@@ -900,7 +900,7 @@ def parse_thesis_file(source: BinaryIO | str, filename: str = "tesis.docx") -> d
         page_estimate = estimate_pages(body_words + bib_words)
         page_estimate_body_only = estimate_pages(body_words)
 
-    return {
+    result = {
         "filename": filename,
         "file_type": "pdf" if lower_name.endswith(".pdf") else "docx",
         "citation_style": citation_style,
@@ -939,3 +939,7 @@ def parse_thesis_file(source: BinaryIO | str, filename: str = "tesis.docx") -> d
             else None
         ),
     }
+    from savt.document_model import ensure_document_model
+
+    ensure_document_model(result)
+    return result

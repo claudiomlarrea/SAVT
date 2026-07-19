@@ -171,13 +171,13 @@ def render_detected_sections(dashboard: dict) -> None:
     st.markdown("## Apartados detectados en el documento")
     if thesis_type == "compendio":
         st.caption(
-            "Tesis por **capítulos / compendio**: se muestran los capítulos como nivel 1. "
-            "Los subtítulos quedan en el árbol (no se mezclan como si fueran capítulos)."
+            "Tesis por **capítulos / compendio**: la tabla sale del **JSON estructurado** "
+            "(contrato documental), no de subtítulos sueltos del PDF."
         )
     else:
         st.caption(
-            "SAVT reconoce primero la estructura real del archivo (encabezados, capítulos o secciones "
-            "canónicas) y luego audita cada bloque por separado."
+            "Los apartados se leen del **documento estructurado** (JSON interno). "
+            "SAVT ya no evalúa adivinando títulos directamente sobre el PDF."
         )
     if not detected:
         st.warning("No se identificaron apartados canónicos con contenido suficiente.")
@@ -932,11 +932,12 @@ def render_final_report(report, dashboard: dict, base_name: str) -> None:
 
     st.markdown("## Informe final SAVT")
     st.caption(
-        "Descargue el informe completo en Excel o Word, o explore el detalle tabular de hallazgos."
+        "Descargue el informe completo en Excel o Word, el JSON estructurado del documento "
+        "(contrato interno), o explore el detalle tabular de hallazgos."
     )
     render_findings_table(report)
 
-    col_csv, col_xlsx, col_docx = st.columns(3)
+    col_csv, col_xlsx, col_docx, col_json = st.columns(4)
     csv = pd.DataFrame(findings_dataframe_rows(report)).to_csv(index=False).encode("utf-8")
     with col_csv:
         st.download_button(
@@ -960,6 +961,17 @@ def render_final_report(report, dashboard: dict, base_name: str) -> None:
             data=docx_bytes,
             file_name=f"informe_savt_{base_name}.docx",
             mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        )
+    with col_json:
+        from savt.document_model import document_model_to_json
+
+        model = dashboard.get("document_model") or {}
+        st.download_button(
+            "Descargar JSON (estructura)",
+            data=document_model_to_json(model).encode("utf-8"),
+            file_name=f"documento_estructurado_{base_name}.json",
+            mime="application/json",
+            help="Representación semántica del documento (capítulos/secciones). Base del motor documental.",
         )
 
 
@@ -1144,6 +1156,7 @@ def _run_app() -> None:
             render_user_feedback(context={"filename": uploaded.name})
             return
 
+        from savt.document_model import build_document_model
         from savt.section_audit import detect_document_sections
         from savt.structure_confirm import apply_manual_outline, apply_section_overrides
 
@@ -1168,9 +1181,11 @@ def _run_app() -> None:
                 return
             # Mantener detected_sections actualizado (no None): si queda None, un rerun
             # vuelve incorrectamente a «1. Detectar estructura».
+            parsed["document_model"] = build_document_model(parsed)
             st.session_state["detected_sections"] = detect_document_sections(parsed)
         else:
             parsed = apply_section_overrides(parsed, structure_choice.get("overrides") or [])
+            parsed["document_model"] = build_document_model(parsed)
             st.session_state["detected_sections"] = detect_document_sections(parsed)
         st.session_state["parsed_doc"] = parsed
 

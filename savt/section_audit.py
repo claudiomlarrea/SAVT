@@ -67,12 +67,37 @@ GLOBAL_SECTIONS = (
 
 
 def detect_document_sections(parsed: dict) -> list[dict]:
-    """Apartados detectados en el documento (índice preferido; partición sin solapamiento)."""
+    """Apartados detectados: preferir contrato document_model; si no, índice/mapa."""
+    from savt.document_model import (
+        ensure_document_model,
+        flatten_document_model_for_display,
+    )
     from savt.structure_confirm import enrich_detected_sections
 
     structure_source = str(parsed.get("structure_source") or "")
+    model = ensure_document_model(parsed)
+    if model.get("chapters") and structure_source in {
+        "index",
+        "confirmed",
+        "capitulos",
+        "manual",
+    }:
+        sections = flatten_document_model_for_display(model)
+        # Alinear source con la fuente real de detección
+        for item in sections:
+            item["source"] = (
+                "manual"
+                if structure_source == "manual"
+                else "index"
+                if structure_source == "index"
+                else "capitulos"
+                if structure_source == "capitulos"
+                else "confirmed"
+            )
+        return enrich_detected_sections(sections, structure_source=structure_source)
+
     if parsed.get("index_sections") and structure_source in {"index", "confirmed", "capitulos", "manual"}:
-        sections: list[dict] = []
+        sections = []
         for idx, item in enumerate(parsed["index_sections"], start=1):
             sections.append(
                 {

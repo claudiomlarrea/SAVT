@@ -504,6 +504,10 @@ def build_dashboard(report: AuditReport, parsed: dict, extras: dict) -> dict:
     citation_reconciliation = build_citation_reconciliation(parsed, report, bib_dashboard)
     critical_findings = build_critical_findings_summary(warnings_list)
 
+    from savt.document_model import ensure_document_model
+
+    document_model = ensure_document_model(parsed)
+
     return {
         "icai": report.score,
         "icai_interpretation": interpretation,
@@ -539,6 +543,7 @@ def build_dashboard(report: AuditReport, parsed: dict, extras: dict) -> dict:
         "structure_source": parsed.get("structure_source", "headings"),
         "thesis_type": parsed.get("thesis_type") or "clasica",
         "structure_tree": parsed.get("structure_tree") or [],
+        "document_model": document_model,
     }
 
 
