@@ -179,6 +179,7 @@ def render_detected_sections(dashboard: dict) -> None:
             "N°": item.get("order", idx),
             "Apartado canónico": item.get("title", "—"),
             "Detectado como": item.get("detected_as", "—"),
+            "Confianza": item.get("confidence_label", "—"),
             "Palabras": item.get("words", 0),
             "% del cuerpo": item.get("percent_label", "—"),
         }
@@ -187,6 +188,113 @@ def render_detected_sections(dashboard: dict) -> None:
     st.dataframe(rows, hide_index=True)
     total_words = sum(item.get("words", 0) for item in detected)
     st.caption(f"Total clasificado en apartados: **{total_words:,}** palabras en **{len(detected)}** bloques.")
+
+
+def render_structure_confirmation(sections: list[dict], structure_source: str = "") -> list[dict] | None:
+    """
+    Pantalla editable: el usuario confirma/corrige el mapa de apartados.
+    Devuelve overrides si confirma; None si aún no.
+    """
+    from savt.structure_confirm import (
+        editor_rows,
+        overrides_from_editor,
+        role_options,
+        structure_confidence_summary,
+    )
+
+    st.markdown("## 1. Confirmar estructura del documento")
+    st.caption(
+        "Revise cómo SAVT entendió los apartados. Corrija títulos equivalentes "
+        "(p. ej. «Materiales y métodos» → Metodología, «Discusiones» → Discusión, "
+        "«Objetivos particulares» → Objetivos) antes de auditar."
+    )
+    if structure_source:
+        source_label = {
+            "index": "índice del documento",
+            "headings": "encabezados del cuerpo",
+            "confirmed": "confirmación previa",
+        }.get(structure_source, structure_source)
+        st.caption(f"Fuente de detección: **{source_label}**.")
+
+    summary = structure_confidence_summary(sections)
+    if summary["needs_review"]:
+        st.warning(
+            f"Hay {summary['low']} apartado(s) con confianza baja y {summary['medium']} con confianza media. "
+            "Conviene corregir el mapa antes de interpretar el veredicto."
+        )
+    else:
+        st.success("La estructura detectada tiene confianza alta. Puede confirmar y auditar.")
+
+    if not sections:
+        st.warning(
+            "No se identificaron apartados con contenido suficiente. "
+            "Puede continuar la auditoría, pero los hallazgos de estructura serán inciertos."
+        )
+        if st.button("Continuar auditoría sin mapa", type="primary"):
+            return []
+        return None
+
+    import pandas as pd
+
+    base_rows = editor_rows(sections)
+    st.session_state["_structure_editor_meta"] = [
+        {"_role_original": r["_role_original"], "_text_key": r["_text_key"]} for r in base_rows
+    ]
+    df = pd.DataFrame(
+        [
+            {
+                "Incluir": r["Incluir"],
+                "Detectado como": r["Detectado como"],
+                "Apartado canónico": r["Apartado canónico"],
+                "Confianza": r["Confianza"],
+                "Palabras": r["Palabras"],
+                "% del cuerpo": r["% del cuerpo"],
+            }
+            for r in base_rows
+        ]
+    )
+    edited = st.data_editor(
+        df,
+        hide_index=True,
+        disabled=["Detectado como", "Confianza", "Palabras", "% del cuerpo"],
+        column_config={
+            "Incluir": st.column_config.CheckboxColumn("Incluir", default=True),
+            "Apartado canónico": st.column_config.SelectboxColumn(
+                "Apartado canónico",
+                options=role_options(),
+                required=True,
+            ),
+        },
+        use_container_width=True,
+        key="structure_editor",
+    )
+
+    col_a, col_b = st.columns(2)
+    with col_a:
+        confirm = st.button("Confirmar estructura y auditar", type="primary")
+    with col_b:
+        skip = st.button("Auditar sin cambios")
+
+    if confirm or skip:
+        if skip:
+            return [
+                {
+                    "role_original": s.get("role"),
+                    "confirmed_role": s.get("role"),
+                    "include": True,
+                    "detected_as": s.get("detected_as"),
+                    "words": s.get("words", 0),
+                }
+                for s in sections
+            ]
+        records = edited.to_dict("records")
+        meta = st.session_state.get("_structure_editor_meta") or []
+        for idx, record in enumerate(records):
+            if idx < len(meta):
+                record["_role_original"] = meta[idx]["_role_original"]
+                record["_text_key"] = meta[idx]["_text_key"]
+        return overrides_from_editor(records)
+    return None
 
 
 def render_technical_section_detail(dashboard: dict) -> None:
@@ -828,16 +936,65 @@ def _run_app() -> None:
     )
 
     if not uploaded:
+        for key in ("parsed_doc", "detected_sections", "structure_ready", "report"):
+            st.session_state.pop(key, None)
         st.info(
             "Suba un archivo .docx o .pdf para iniciar la pre-auditoría académica. "
-            "Seleccione el perfil institucional en la barra lateral (UCCuyo, UNCUyo, posgrado). "
-            "El informe cubre estructura, normativa, integridad, ética y profundidad."
+            "Primero se detecta la estructura (editable) y luego se audita. "
+            "Seleccione el perfil institucional en la barra lateral."
         )
         st.divider()
         render_user_feedback()
         return
 
-    if st.button("Ejecutar auditoría", type="primary"):
+    # Nuevo archivo: limpiar estado de estructura/informe previos.
+    if st.session_state.get("uploaded_name") != uploaded.name:
+        st.session_state["uploaded_name"] = uploaded.name
+        for key in ("parsed_doc", "detected_sections", "structure_ready", "report"):
+            st.session_state.pop(key, None)
+
+    parsed = st.session_state.get("parsed_doc")
+    detected = st.session_state.get("detected_sections")
+
+    if parsed is None or detected is None:
+        if st.button("1. Detectar estructura", type="primary"):
+            with st.spinner("Extrayendo texto y localizando apartados…"):
+                from savt.audit import prepare_document
+
+                parsed, resolved_config, detected = prepare_document(
+                    io.BytesIO(uploaded.getvalue()),
+                    filename=uploaded.name,
+                    config=config,
+                )
+            st.session_state["parsed_doc"] = parsed
+            st.session_state["detected_sections"] = detected
+            st.session_state["resolved_config"] = resolved_config
+            st.session_state.pop("report", None)
+            st.rerun()
+        st.info(
+            "Paso 1: detectar cómo está organizada la tesis. "
+            "Podrá corregir apartados mal asignados antes de auditar."
+        )
+        st.divider()
+        render_user_feedback(context={"filename": uploaded.name})
+        return
+
+    overrides = None
+    if not st.session_state.get("report"):
+        overrides = render_structure_confirmation(
+            detected,
+            structure_source=str(parsed.get("structure_source") or ""),
+        )
+        if overrides is None:
+            st.divider()
+            render_user_feedback(context={"filename": uploaded.name})
+            return
+
+        from savt.structure_confirm import apply_section_overrides
+
+        parsed = apply_section_overrides(parsed, overrides)
+        st.session_state["parsed_doc"] = parsed
+
         progress_bar = st.progress(0.0)
         status_box = st.empty()
 
@@ -845,13 +1002,14 @@ def _run_app() -> None:
             progress_bar.progress(min(max(fraction, 0.0), 1.0))
             status_box.markdown(f"**{phase}** — {detail}")
 
-        with st.spinner("Analizando tesis…"):
-            from savt.audit import run_audit
+        with st.spinner("Auditando tesis con la estructura confirmada…"):
+            from savt.audit import run_audit_from_parsed
 
-            report = run_audit(
-                io.BytesIO(uploaded.getvalue()),
+            resolved = st.session_state.get("resolved_config") or config
+            report = run_audit_from_parsed(
+                parsed,
                 filename=uploaded.name,
-                config=config,
+                config=resolved,
                 on_progress=on_progress,
             )
         progress_bar.progress(1.0)
@@ -865,7 +1023,7 @@ def _run_app() -> None:
         except Exception:
             pass
         st.session_state["report"] = report
-        st.session_state["profile_id"] = config.profile_id
+        st.session_state["profile_id"] = resolved.profile_id
         st.rerun()
 
     report = st.session_state.get("report")
@@ -881,9 +1039,15 @@ def _run_app() -> None:
         render_user_feedback(context={"filename": uploaded.name})
         return
 
+    if st.button("↩ Revisar estructura y reauditar"):
+        st.session_state.pop("report", None)
+        st.rerun()
+
     base_name = uploaded.name.rsplit(".", 1)[0]
 
     render_document_data(dashboard, report)
+    st.divider()
+    render_detected_sections(dashboard)
     st.divider()
     render_verdict(dashboard)
     st.divider()

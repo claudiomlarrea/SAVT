@@ -37,14 +37,32 @@ def _emit_progress(
         callback(phase, detail, fraction, payload)
 
 
-def run_audit(
+def prepare_document(
     source,
+    filename: str = "tesis.docx",
+    config: AuditConfig | None = None,
+) -> tuple[dict, AuditConfig, list[dict]]:
+    """Parsea el documento y detecta apartados sin auditar (paso de confirmación)."""
+    if config is None:
+        config = AuditConfig()
+    parsed = parse_thesis_file(source, filename=filename)
+    config.resolve_for_document(parsed.get("full_text", ""), parsed.get("page_estimate", 0))
+
+    from savt.section_audit import detect_document_sections
+
+    detected_sections = detect_document_sections(parsed)
+    return parsed, config, detected_sections
+
+
+def run_audit_from_parsed(
+    parsed: dict,
     filename: str = "tesis.docx",
     verify_references_online: bool = True,
     max_doi_checks: int = 25,
     config: AuditConfig | None = None,
     on_progress: Optional[AuditProgressCallback] = None,
 ) -> AuditReport:
+    """Audita un documento ya parseado (opcionalmente con estructura confirmada)."""
     if config is None:
         config = AuditConfig(
             verify_references_online=verify_references_online,
@@ -54,8 +72,8 @@ def run_audit(
         config.verify_references_online = verify_references_online
         config.max_doi_checks = max_doi_checks
 
-    parsed = parse_thesis_file(source, filename=filename)
-    config.resolve_for_document(parsed.get("full_text", ""), parsed.get("page_estimate", 0))
+    if not config._resolved_profile_id:
+        config.resolve_for_document(parsed.get("full_text", ""), parsed.get("page_estimate", 0))
 
     pipeline_steps = parsed.get("pipeline") or []
     for idx, step in enumerate(pipeline_steps):
@@ -198,3 +216,23 @@ def run_audit(
         {"detected_sections": detected_sections, "section_audits": report.metadata["dashboard"].get("section_audits")},
     )
     return report
+
+
+def run_audit(
+    source,
+    filename: str = "tesis.docx",
+    verify_references_online: bool = True,
+    max_doi_checks: int = 25,
+    config: AuditConfig | None = None,
+    on_progress: Optional[AuditProgressCallback] = None,
+) -> AuditReport:
+    """Parsea y audita en un solo paso (compatibilidad). Preferir prepare_document + run_audit_from_parsed."""
+    parsed, resolved_config, _detected = prepare_document(source, filename=filename, config=config)
+    return run_audit_from_parsed(
+        parsed,
+        filename=filename,
+        verify_references_online=verify_references_online,
+        max_doi_checks=max_doi_checks,
+        config=resolved_config,
+        on_progress=on_progress,
+    )

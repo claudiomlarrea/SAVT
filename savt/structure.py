@@ -282,13 +282,43 @@ def audit_structure(parsed: dict) -> tuple[list[Finding], dict]:
         },
     ]
 
+    confirmed = bool(parsed.get("structure_confirmed"))
+    structure_source = str(parsed.get("structure_source") or "")
+    uncertain_default = not confirmed and structure_source != "index"
+
     dashboard = {
-        "introduccion": {"checks": intro_checks, "present": bool(intro or intro_scope)},
-        "marco_teorico": {"checks": marco_checks, "present": bool(marco and len(marco) > 300)},
-        "metodologia": {"checks": method_checks, "present": bool(method)},
-        "resultados": {"checks": results_checks, "present": bool(results), "length": len(results)},
-        "discusion": {"checks": discussion_checks, "present": bool(discussion), "length": len(discussion)},
-        "conclusiones": {"checks": conclusion_checks, "present": bool(conclusions_block)},
+        "introduccion": {
+            "checks": intro_checks,
+            "present": bool(intro or intro_scope),
+            "uncertain": uncertain_default and not bool(intro or intro_scope),
+        },
+        "marco_teorico": {
+            "checks": marco_checks,
+            "present": bool(marco and len(marco) > 300),
+            "uncertain": uncertain_default and not bool(marco and len(marco) > 300),
+        },
+        "metodologia": {
+            "checks": method_checks,
+            "present": bool(method),
+            "uncertain": uncertain_default and not bool(method),
+        },
+        "resultados": {
+            "checks": results_checks,
+            "present": bool(results),
+            "length": len(results),
+            "uncertain": uncertain_default and not bool(results),
+        },
+        "discusion": {
+            "checks": discussion_checks,
+            "present": bool(discussion),
+            "length": len(discussion),
+            "uncertain": uncertain_default and not bool(discussion),
+        },
+        "conclusiones": {
+            "checks": conclusion_checks,
+            "present": bool(conclusions_block),
+            "uncertain": uncertain_default and not bool(conclusions_block),
+        },
     }
 
     intro_missing = [c["label"] for c in intro_checks if not c["ok"]]
@@ -398,10 +428,19 @@ def audit_structure(parsed: dict) -> tuple[list[Finding], dict]:
             findings.append(
                 Finding(
                     module="Estructura",
-                    severity="warning",
+                    severity="info" if uncertain_default else "warning",
                     area="Estructura",
-                    title=f"{label} no detectada",
-                    detail=f"No se encontró una sección clara de {section_name.lower()}.",
+                    title=(
+                        f"{label}: localización incierta"
+                        if uncertain_default
+                        else f"{label} no detectada"
+                    ),
+                    detail=(
+                        f"No se encontró con certeza una sección de {section_name.lower()}. "
+                        "Confirme el mapa de apartados si el título usa un sinónimo."
+                        if uncertain_default
+                        else f"No se encontró una sección clara de {section_name.lower()}."
+                    ),
                     why=why,
                     how_to_fix=how,
                 )

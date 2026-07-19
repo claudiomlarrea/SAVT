@@ -68,7 +68,10 @@ GLOBAL_SECTIONS = (
 
 def detect_document_sections(parsed: dict) -> list[dict]:
     """Apartados detectados en el documento (índice preferido; partición sin solapamiento)."""
-    if parsed.get("index_sections") and parsed.get("structure_source") == "index":
+    from savt.structure_confirm import enrich_detected_sections
+
+    structure_source = str(parsed.get("structure_source") or "")
+    if parsed.get("index_sections") and structure_source in {"index", "confirmed"}:
         sections: list[dict] = []
         for idx, item in enumerate(parsed["index_sections"], start=1):
             sections.append(
@@ -81,15 +84,15 @@ def detect_document_sections(parsed: dict) -> list[dict]:
                     "percent_label": item.get("percent_label", "—"),
                     "order": idx,
                     "page": item.get("page"),
-                    "source": "index",
+                    "source": "index" if structure_source == "index" else "confirmed",
                 }
             )
-        return sections
+        return enrich_detected_sections(sections, structure_source=structure_source)
 
     role_texts, meta = get_section_word_partition(parsed)
     total = max(parsed.get("word_count") or 0, 1)
 
-    sections: list[dict] = []
+    sections = []
     for role, label in CANONICAL_SECTION_ORDER:
         text = role_texts.get(role, "")
         words = count_words(text)
@@ -106,9 +109,10 @@ def detect_document_sections(parsed: dict) -> list[dict]:
                 "percent": pct,
                 "percent_label": f"{pct:.1f}%",
                 "order": len(sections) + 1,
+                "user_confirmed": bool(meta.get(role, {}).get("user_confirmed")),
             }
         )
-    return sections
+    return enrich_detected_sections(sections, structure_source=structure_source)
 
 
 def infer_finding_section(finding: Finding) -> str:

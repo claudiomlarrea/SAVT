@@ -191,6 +191,7 @@ def _missing_guidance(missing_labels: list[str]) -> tuple[str, str, str]:
 def _review_from_checks(section_key: str, block: dict, required: set[str] | None = None) -> dict:
     checks = block.get("checks", [])
     present = block.get("present", False)
+    uncertain = bool(block.get("uncertain"))
     if required is None:
         required = {c["label"] for c in checks}
 
@@ -202,10 +203,32 @@ def _review_from_checks(section_key: str, block: dict, required: set[str] | None
     partial = [c["label"] for c in checks if c.get("partial")]
 
     if not present and not checks:
+        if uncertain:
+            return {
+                "key": section_key,
+                "title": SECTION_TITLES.get(section_key, section_key),
+                "status": "partial",
+                "ok": False,
+                "partial": True,
+                "missing": [],
+                "partial_items": ["localización incierta"],
+                "summary": (
+                    "No se localizó este apartado con certeza. "
+                    "Revise la estructura detectada antes de interpretarlo como no conforme."
+                ),
+                "why": "La evaluación depende de una detección fiable del apartado en el documento.",
+                "how_to_fix": (
+                    "Confirme o corrija el mapa de apartados (títulos equivalentes como "
+                    "«Materiales y métodos» o «Discusiones») y vuelva a auditar."
+                ),
+                "checks": checks,
+            }
         missing = ["presente"]
 
     if not missing and not partial and (present or all(c.get("ok") for c in checks if c["label"] in required)):
         status = "ok"
+    elif missing and uncertain and not present:
+        status = "partial"
     elif missing:
         status = "fail"
     elif partial:
@@ -219,6 +242,14 @@ def _review_from_checks(section_key: str, block: dict, required: set[str] | None
         summary = "El apartado cumple los criterios detectados automáticamente."
         why = "La estructura y el contenido mínimo esperado están presentes."
         how_to_fix = ""
+    elif status == "partial" and uncertain and not present:
+        summary = (
+            "Localización incierta: no se pudo afirmar con claridad que el apartado esté ausente."
+        )
+        why = "En PDF con formatos heterogéneos, la no detección no equivale siempre a ausencia."
+        how_to_fix = (
+            "Confirme el mapa de apartados y, si el bloque existe con otro título, asígnelo al rol canónico."
+        )
 
     return {
         "key": section_key,
@@ -261,6 +292,26 @@ def build_discussion_review(block: dict) -> dict:
     ]
 
     if not present and "discusion presente" not in missing:
+        if block.get("uncertain"):
+            return {
+                "key": "discusion",
+                "title": SECTION_TITLES["discusion"],
+                "status": "partial",
+                "ok": False,
+                "partial": True,
+                "missing": [],
+                "partial_items": ["discusion presente"],
+                "summary": (
+                    "No se localizó la discusión con certeza (puede figurar como «Discusiones» "
+                    "u otro título equivalente)."
+                ),
+                "why": CHECK_GUIDANCE["discusion presente"]["why"],
+                "how_to_fix": (
+                    "Confirme el mapa de apartados y asigne el bloque correspondiente al rol "
+                    "«Discusión» antes de considerarlo no conforme."
+                ),
+                "checks": checks,
+            }
         missing.insert(0, "discusion presente")
 
     if not missing and not partial:
