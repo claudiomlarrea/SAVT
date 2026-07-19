@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import re
+import unicodedata
+
 from savt.word_stats import CANONICAL_SECTION_ORDER, count_words
 
 ROLE_LABELS: dict[str, str] = {role: label for role, label in CANONICAL_SECTION_ORDER}
@@ -38,6 +41,13 @@ def confidence_for_section(
         "detectado por contenido",
     }
     weak_title = title in weak_titles or "detectado por contenido" in title
+
+    if source == "manual" or structure_source == "manual":
+        if words >= 80 and not weak_title:
+            return "high", CONFIDENCE_LABELS["high"]
+        if words >= 40:
+            return "medium", CONFIDENCE_LABELS["medium"]
+        return "low", CONFIDENCE_LABELS["low"]
 
     if source == "index" or structure_source in {"index", "capitulos"}:
         if words >= 200 and not weak_title:
@@ -255,3 +265,438 @@ def structure_confidence_summary(sections: list[dict]) -> dict:
         "low": sum(1 for c in levels if c == "low"),
         "needs_review": sum(1 for c in levels if c in {"low", "medium"}) > 0,
     }
+
+
+MANUAL_OUTLINE_PLACEHOLDER = """Pegue aquí el índice o la lista de apartados (un título por línea).
+Opcional: agregue el rol canónico separado por | 
+
+Ejemplo:
+RESUMEN | presentacion
+CAPÍTULO I: EFECTOS BENÉFICOS DE Trichoderma | marco_teorico
+CAPÍTULO II: Trichoderma virens Y PRODUCCIÓN ENZIMÁTICA | marco_teorico
+CAPÍTULO III | objetivos
+OBJETIVO GENERAL | objetivos
+OBJETIVOS ESPECÍFICOS | objetivos
+CAPÍTULO IV: CARACTERIZACIÓN DE UN NUEVO FACTOR… | introduccion
+INTRODUCCIÓN | introduccion
+MÉTODOS | metodologia
+RESULTADOS | resultados
+DISCUSIÓN | discusion
+CONCLUSIÓN | conclusiones
+REFERENCIAS | bibliografia
+CAPÍTULO V: PRODUCCIÓN DE CELULASA… | metodologia
+MATERIALES Y MÉTODOS | metodologia
+RESULTADOS | resultados
+DISCUSIÓN | discusion
+REFERENCIAS | bibliografia
+"""
+
+_ROLE_ALIASES_MANUAL = {
+    "presentacion": "presentacion",
+    "presentación": "presentacion",
+    "resumen": "presentacion",
+    "abstract": "presentacion",
+    "introduccion": "introduccion",
+    "introducción": "introduccion",
+    "objetivos": "objetivos",
+    "objetivo": "objetivos",
+    "marco": "marco_teorico",
+    "marco_teorico": "marco_teorico",
+    "marco teórico": "marco_teorico",
+    "metodologia": "metodologia",
+    "metodología": "metodologia",
+    "metodos": "metodologia",
+    "métodos": "metodologia",
+    "resultados": "resultados",
+    "discusion": "discusion",
+    "discusión": "discusion",
+    "discusiones": "discusion",
+    "conclusiones": "conclusiones",
+    "conclusión": "conclusiones",
+    "bibliografia": "bibliografia",
+    "bibliografía": "bibliografia",
+    "referencias": "bibliografia",
+    "otros": "otros",
+    "omitir": "omitir",
+}
+
+
+def _normalize_manual_role(value: str) -> str:
+    raw = (value or "").strip().lower()
+    if not raw:
+        return "otros"
+    if raw in ROLE_LABELS:
+        return raw
+    mapped = _ROLE_ALIASES_MANUAL.get(raw)
+    if mapped:
+        return mapped
+    # Etiqueta canónica completa
+    for role, label in ROLE_LABELS.items():
+        if label.lower() == raw:
+            return role
+    from savt.section_resolver import classify_heading
+
+    return classify_heading(value) or "otros"
+
+
+def parse_manual_outline(text: str) -> list[dict]:
+    """
+    Parsea líneas de índice/estructura manual.
+    Formatos:
+      - Título
+      - Título | rol
+      - 1. Título | metodologia
+    """
+    from savt.section_resolver import classify_heading
+
+    entries: list[dict] = []
+    if not text or not text.strip():
+        return entries
+
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        # Quitar puntos líderes de índice: «1. Título ….. 12»
+        line = re.sub(r"[.\u2026…]{2,}\s*\S+\s*$", "", line).strip()
+        line = re.sub(r"^\d+(?:\.\d+)*\.?\s+", "", line).strip()
+        if not line:
+            continue
+
+        if "|" in line:
+            title_part, role_part = line.split("|", 1)
+            title = title_part.strip()
+            role = _normalize_manual_role(role_part.strip())
+        else:
+            title = line
+            role = classify_heading(title) or "otros"
+
+        if len(title) < 3:
+            continue
+        entries.append(
+            {
+                "title": title[:220],
+                "role": role,
+                "include": role != "omitir",
+            }
+        )
+    return entries
+
+
+_ROMAN_ARABIC = {
+    "I": "1",
+    "II": "2",
+    "III": "3",
+    "IV": "4",
+    "V": "5",
+    "VI": "6",
+    "VII": "7",
+    "VIII": "8",
+    "IX": "9",
+    "X": "10",
+    "XI": "11",
+    "XII": "12",
+}
+_ARABIC_ROMAN = {v: k for k, v in _ROMAN_ARABIC.items()}
+
+
+def _fold_accents(text: str) -> str:
+    normalized = unicodedata.normalize("NFD", text or "")
+    return "".join(ch for ch in normalized if unicodedata.category(ch) != "Mn")
+
+
+def _char_class(ch: str) -> str:
+    """Clase regex que tolera mayúsculas/minúsculas y acentos frecuentes."""
+    base = _fold_accents(ch).upper()
+    variants = {
+        "A": "AÁÀÄÂaáàäâ",
+        "E": "EÉÈËÊeéèëê",
+        "I": "IÍÌÏÎiíìïî",
+        "O": "OÓÒÖÔoóòöô",
+        "U": "UÚÙÜÛuúùüû",
+        "N": "NÑnñ",
+        "C": "CÇcç",
+    }
+    if base in variants:
+        return f"[{variants[base]}]"
+    if ch.isalnum():
+        return f"[{re.escape(ch.upper())}{re.escape(ch.lower())}]"
+    return re.escape(ch)
+
+
+def _token_to_pattern(token: str, *, after_capitulo: bool = False) -> str:
+    raw = token.strip().rstrip(".:;,—–-")
+    if not raw:
+        return ""
+    folded = _fold_accents(raw).upper()
+    if after_capitulo:
+        roman = folded.strip(".")
+        if roman in _ROMAN_ARABIC:
+            arab = _ROMAN_ARABIC[roman]
+            return rf"(?:{roman}|{arab})\.?"
+        if roman in _ARABIC_ROMAN:
+            rom = _ARABIC_ROMAN[roman]
+            return rf"(?:{rom}|{roman})\.?"
+    if folded in {"CAPITULO", "CAPÍTULO"}:
+        return r"CAP[IÍ]TULO"
+    return "".join(_char_class(ch) for ch in raw)
+
+
+def _flexible_title_pattern(title: str, *, loose: bool = False) -> re.Pattern[str]:
+    words = [w for w in re.split(r"\s+", title.strip()) if w]
+    if not words:
+        return re.compile(r"(?!x)x")
+    # Usar primeras palabras para tolerar títulos partidos / truncados en PDF
+    limit = 4 if loose else (8 if len(words) > 8 else len(words))
+    core = words[:limit]
+    parts: list[str] = []
+    prev_capitulo = False
+    for word in core:
+        part = _token_to_pattern(word, after_capitulo=prev_capitulo)
+        if not part:
+            continue
+        parts.append(part)
+        folded = _fold_accents(word).upper().rstrip(".:")
+        prev_capitulo = folded in {"CAPITULO", "CAPÍTULO"}
+    if not parts:
+        return re.compile(r"(?!x)x")
+    joined = r"\s+".join(parts)
+    # Ancla por límite de palabra (no solo inicio de línea): en índices PDF
+    # varios títulos pueden ir en la misma línea.
+    return re.compile(rf"(?is)(?<![A-Za-zÁÉÍÓÚÜÑáéíóúüñ])(?:[IVXLC\d]{{1,6}}\s+)?{joined}")
+
+
+def _looks_like_toc_hit(body: str, pos: int) -> bool:
+    """Detecta títulos embebidos en la tabla de contenido (varios encabezados seguidos)."""
+    body_len = max(len(body), 1)
+    following = body[pos : pos + 160]
+    headers_after = re.findall(
+        r"(?i)\b(?:"
+        r"CAP[IÍ]TULO|REFERENCIAS|BIBLIOGRAF[IÍ]A|FIGURAS|TABLAS|ABSTRACT|"
+        r"RESUMEN|INTRODUCCI[OÓ]N|M[EÉ]TODOS|MATERIALES|RESULTADOS|"
+        r"DISCUSI[OÓ]N(?:ES)?|CONCLUSI[OÓ]N(?:ES)?|OBJETIVOS?|JUSTIFICACI[OÓ]N|"
+        r"HIP[OÓ]TESIS|ANEXOS?"
+        r")\b",
+        following,
+    )
+    lowercase_words = re.findall(r"\b[a-záéíóúüñ]{4,}\b", following)
+    # En el índice suelen encadenarse apartados con poca prosa en minúsculas
+    if len(headers_after) >= 3 and len(lowercase_words) <= 4:
+        return True
+    # Zona temprana: dos encabezados seguidos (p. ej. OBJETIVOS … CAPITULO IV) = TOC
+    if (
+        pos < int(body_len * 0.12)
+        and len(headers_after) >= 2
+        and len(lowercase_words) <= 6
+        and re.search(r"(?i)\bCAP[IÍ]TULO\b", following)
+    ):
+        return True
+    # Línea típica de TOC: título + puntos + número de página
+    line_end = body.find("\n", pos)
+    line = body[pos : line_end if line_end != -1 else pos + 100]
+    if re.search(r"[.\u2026…]{2,}\s*\d+\s*$", line):
+        return True
+    return False
+
+
+def _heading_score(body: str, pos: int, *, body_len: int, min_pos: int) -> int:
+    """Prioriza coincidencias de cuerpo (no índice) y títulos al inicio de línea."""
+    score = 0
+    if pos >= min_pos:
+        score += 20
+    if pos >= int(body_len * 0.08):
+        score += 12
+    if pos >= int(body_len * 0.12):
+        score += 8
+    prev = body[max(0, pos - 2) : pos]
+    if "\n" in prev or pos == 0:
+        score += 10
+    # Línea relativamente corta → más probable que sea encabezado
+    line_end = body.find("\n", pos)
+    line = body[pos : line_end if line_end != -1 else min(pos + 160, body_len)]
+    if len(line.strip()) <= 120:
+        score += 6
+    if len(line.strip()) <= 60:
+        score += 4
+    if _looks_like_toc_hit(body, pos):
+        score -= 40
+    return score
+
+
+def locate_title_in_text(
+    body: str,
+    title: str,
+    *,
+    min_pos: int = 0,
+    occupied: list[tuple[int, int]] | None = None,
+) -> int | None:
+    """Busca el título declarado por el usuario en el cuerpo del documento."""
+    if not body or not title:
+        return None
+
+    matches = list(_flexible_title_pattern(title).finditer(body))
+    if not matches:
+        words = title.split()
+        if len(words) >= 2:
+            matches = list(_flexible_title_pattern(title, loose=True).finditer(body))
+    if not matches and len(title.split()) >= 3:
+        short = " ".join(title.split()[:3])
+        matches = list(_flexible_title_pattern(short, loose=True).finditer(body))
+    if not matches:
+        return None
+
+    occupied = occupied or []
+
+    def _is_free(pos: int) -> bool:
+        for start, end in occupied:
+            if start - 30 <= pos <= end + 30:
+                return False
+        return True
+
+    body_len = max(len(body), 1)
+    free = [m for m in matches if _is_free(m.start())]
+    if not free:
+        return None
+
+    # Preferir apariciones reales del cuerpo; si solo hay hits de TOC, no usarlos
+    body_hits = [m for m in free if not _looks_like_toc_hit(body, m.start())]
+    pool_src = body_hits if body_hits else []
+    if not pool_src:
+        # Título solo en índice → mejor reportarlo como no localizado
+        return None
+
+    ranked = sorted(
+        pool_src,
+        key=lambda m: (
+            -_heading_score(body, m.start(), body_len=body_len, min_pos=min_pos),
+            m.start() if m.start() >= min_pos else body_len + m.start(),
+        ),
+    )
+    pool = [m for m in ranked if m.start() >= min_pos] or ranked
+    if len(pool) >= 2 and all(m.start() < int(body_len * 0.15) for m in pool):
+        return max(pool, key=lambda m: m.start()).start()
+    return pool[0].start()
+
+
+def apply_manual_outline(parsed: dict, entries: list[dict]) -> dict:
+    """
+    Localiza en el texto cada título ingresado por el usuario y arma section_map.
+    Los bloques se cortan desde un título hasta el siguiente.
+    """
+    body = parsed.get("body") or parsed.get("full_text") or ""
+    if not body or not entries:
+        return parsed
+
+    active = [e for e in entries if e.get("include", True) and e.get("role") != "omitir"]
+    if not active:
+        return parsed
+
+    located: list[tuple[int, dict]] = []
+    occupied: list[tuple[int, int]] = []
+    cursor = 0
+    for entry in active:
+        title = str(entry.get("title") or "")
+        # Preferir orden del índice; si no aparece después del cursor, buscar en todo el doc
+        # (p. ej. bibliografías de capítulos previos).
+        pos = locate_title_in_text(body, title, min_pos=cursor, occupied=occupied)
+        if pos is None and cursor > 0:
+            pos = locate_title_in_text(body, title, min_pos=0, occupied=occupied)
+        if pos is None:
+            continue
+        located.append((pos, entry))
+        occupied.append((pos, pos + max(len(title), 8)))
+        cursor = max(cursor, pos + 5)
+
+    located.sort(key=lambda item: item[0])
+    # Deduplicar posiciones casi iguales
+    unique: list[tuple[int, dict]] = []
+    for pos, entry in located:
+        if unique and pos - unique[-1][0] < 15:
+            continue
+        unique.append((pos, entry))
+
+    section_map: dict[str, str] = {}
+    section_meta: dict[str, dict] = {}
+    index_sections: list[dict] = []
+    missing: list[str] = []
+
+    found_titles = {e.get("title") for _, e in unique}
+    for entry in active:
+        if entry.get("title") not in found_titles:
+            missing.append(str(entry.get("title")))
+
+    for idx, (pos, entry) in enumerate(unique):
+        end = unique[idx + 1][0] if idx + 1 < len(unique) else len(body)
+        chunk = body[pos:end].strip()
+        words = count_words(chunk)
+        if words < 20:
+            continue
+        role = entry.get("role") or "otros"
+        title = str(entry.get("title") or ROLE_LABELS.get(role, role))
+        if role in {"otros"}:
+            key = f"otros_{idx + 1}"
+            section_map[key] = chunk
+            section_meta[key] = {
+                "detected_titles": [title],
+                "user_confirmed": True,
+                "manual": True,
+            }
+            index_sections.append(
+                {"role": "otros", "title": title, "words": words, "manual": True}
+            )
+            continue
+
+        if role in section_map and section_map[role].strip():
+            if chunk not in section_map[role]:
+                section_map[role] = f"{section_map[role].rstrip()}\n\n{chunk}"
+            titles = list(section_meta[role].get("detected_titles") or [])
+            if title not in titles:
+                titles.append(title)
+            section_meta[role]["detected_titles"] = titles
+        else:
+            section_map[role] = chunk
+            section_meta[role] = {
+                "detected_titles": [title],
+                "user_confirmed": True,
+                "manual": True,
+                "confidence": "high",
+            }
+        index_sections.append(
+            {
+                "role": role,
+                "title": title,
+                "words": words,
+                "manual": True,
+            }
+        )
+
+    total = max(sum(int(i.get("words") or 0) for i in index_sections), 1)
+    for item in index_sections:
+        pct = round(int(item.get("words") or 0) * 100 / total, 1)
+        item["percent"] = pct
+        item["percent_label"] = f"{pct:.1f}%"
+
+    parsed = dict(parsed)
+    parsed["section_map"] = section_map
+    parsed["section_meta"] = section_meta
+    parsed["index_sections"] = index_sections
+    parsed["structure_source"] = "manual"
+    parsed["structure_confirmed"] = True
+    parsed["manual_missing_titles"] = missing
+    return parsed
+
+
+CANONICAL_TEMPLATE_OUTLINE = """RESUMEN | presentacion
+INTRODUCCIÓN | introduccion
+OBJETIVO GENERAL | objetivos
+OBJETIVOS ESPECÍFICOS | objetivos
+MARCO TEÓRICO | marco_teorico
+METODOLOGÍA | metodologia
+MATERIALES Y MÉTODOS | metodologia
+RESULTADOS | resultados
+DISCUSIÓN | discusion
+CONCLUSIONES | conclusiones
+REFERENCIAS | bibliografia
+BIBLIOGRAFÍA | bibliografia
+"""
+

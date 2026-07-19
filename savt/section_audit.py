@@ -71,7 +71,7 @@ def detect_document_sections(parsed: dict) -> list[dict]:
     from savt.structure_confirm import enrich_detected_sections
 
     structure_source = str(parsed.get("structure_source") or "")
-    if parsed.get("index_sections") and structure_source in {"index", "confirmed", "capitulos"}:
+    if parsed.get("index_sections") and structure_source in {"index", "confirmed", "capitulos", "manual"}:
         sections: list[dict] = []
         for idx, item in enumerate(parsed["index_sections"], start=1):
             sections.append(
@@ -85,7 +85,9 @@ def detect_document_sections(parsed: dict) -> list[dict]:
                     "order": idx,
                     "page": item.get("page"),
                     "source": (
-                        "index"
+                        "manual"
+                        if structure_source == "manual"
+                        else "index"
                         if structure_source == "index"
                         else "capitulos"
                         if structure_source == "capitulos"

@@ -190,111 +190,211 @@ def render_detected_sections(dashboard: dict) -> None:
     st.caption(f"Total clasificado en apartados: **{total_words:,}** palabras en **{len(detected)}** bloques.")
 
 
-def render_structure_confirmation(sections: list[dict], structure_source: str = "") -> list[dict] | None:
+def render_structure_confirmation(sections: list[dict], structure_source: str = "") -> dict | None:
     """
-    Pantalla editable: el usuario confirma/corrige el mapa de apartados.
-    Devuelve overrides si confirma; None si aún no.
+    Pantalla de estructura: automática (editable) o manual (índice pegado por el usuario).
+    Devuelve:
+      {"mode": "overrides", "overrides": [...]}
+      {"mode": "manual", "entries": [...]}
+      None si aún no confirma.
     """
     from savt.structure_confirm import (
+        CANONICAL_TEMPLATE_OUTLINE,
+        MANUAL_OUTLINE_PLACEHOLDER,
         editor_rows,
         overrides_from_editor,
+        parse_manual_outline,
         role_options,
         structure_confidence_summary,
+        ROLE_LABELS,
     )
 
-    st.markdown("## 1. Confirmar estructura del documento")
+    st.markdown("## 1. Estructura del documento")
     st.caption(
-        "Revise cómo SAVT entendió los apartados. Corrija títulos equivalentes "
-        "(p. ej. «Materiales y métodos» → Metodología, «Discusiones» → Discusión, "
-        "«Objetivos particulares» → Objetivos) antes de auditar."
-    )
-    if structure_source:
-        source_label = {
-            "index": "índice del documento",
-            "capitulos": "capítulos del cuerpo del documento",
-            "headings": "encabezados del cuerpo",
-            "confirmed": "confirmación previa",
-        }.get(structure_source, structure_source)
-        st.caption(f"Fuente de detección: **{source_label}**.")
-
-    summary = structure_confidence_summary(sections)
-    if summary["needs_review"]:
-        st.warning(
-            f"Hay {summary['low']} apartado(s) con confianza baja y {summary['medium']} con confianza media. "
-            "Conviene corregir el mapa antes de interpretar el veredicto."
-        )
-    else:
-        st.success("La estructura detectada tiene confianza alta. Puede confirmar y auditar.")
-
-    if not sections:
-        st.warning(
-            "No se identificaron apartados con contenido suficiente. "
-            "Puede continuar la auditoría, pero los hallazgos de estructura serán inciertos."
-        )
-        if st.button("Continuar auditoría sin mapa", type="primary"):
-            return []
-        return None
-
-    import pandas as pd
-
-    base_rows = editor_rows(sections)
-    st.session_state["_structure_editor_meta"] = [
-        {"_role_original": r["_role_original"], "_text_key": r["_text_key"]} for r in base_rows
-    ]
-    df = pd.DataFrame(
-        [
-            {
-                "Incluir": r["Incluir"],
-                "Detectado como": r["Detectado como"],
-                "Apartado canónico": r["Apartado canónico"],
-                "Confianza": r["Confianza"],
-                "Palabras": r["Palabras"],
-                "% del cuerpo": r["% del cuerpo"],
-            }
-            for r in base_rows
-        ]
-    )
-    edited = st.data_editor(
-        df,
-        hide_index=True,
-        disabled=["Detectado como", "Confianza", "Palabras", "% del cuerpo"],
-        column_config={
-            "Incluir": st.column_config.CheckboxColumn("Incluir", default=True),
-            "Apartado canónico": st.column_config.SelectboxColumn(
-                "Apartado canónico",
-                options=role_options(),
-                required=True,
-            ),
-        },
-        use_container_width=True,
-        key="structure_editor",
+        "Si la detección automática mezcla capítulos y subtítulos, use la pestaña "
+        "**Ingresar índice manualmente** y pegue la tabla de contenido real."
     )
 
-    col_a, col_b = st.columns(2)
-    with col_a:
-        confirm = st.button("Confirmar estructura y auditar", type="primary")
-    with col_b:
-        skip = st.button("Auditar sin cambios")
+    tab_auto, tab_manual = st.tabs(["Automática (detectada)", "Ingresar índice manualmente"])
 
-    if confirm or skip:
-        if skip:
-            return [
-                {
-                    "role_original": s.get("role"),
-                    "confirmed_role": s.get("role"),
-                    "include": True,
-                    "detected_as": s.get("detected_as"),
-                    "words": s.get("words", 0),
-                }
-                for s in sections
+    with tab_auto:
+        if structure_source:
+            source_label = {
+                "index": "índice del documento",
+                "capitulos": "capítulos del cuerpo del documento",
+                "headings": "encabezados del cuerpo",
+                "confirmed": "confirmación previa",
+                "manual": "estructura manual",
+            }.get(structure_source, structure_source)
+            st.caption(f"Fuente de detección: **{source_label}**.")
+
+        summary = structure_confidence_summary(sections)
+        if not sections:
+            st.warning("No se identificaron apartados automáticamente. Use la pestaña manual.")
+        elif summary["needs_review"]:
+            st.warning(
+                f"Hay {summary['low']} apartado(s) con confianza baja y {summary['medium']} con confianza media. "
+                "Si el mapa no coincide con su tesis, pase a la pestaña manual."
+            )
+        else:
+            st.info("Estructura detectada. Puede confirmarla o reemplazarla con su índice real.")
+
+        import pandas as pd
+
+        if sections:
+            base_rows = editor_rows(sections)
+            st.session_state["_structure_editor_meta"] = [
+                {"_role_original": r["_role_original"], "_text_key": r["_text_key"]} for r in base_rows
             ]
-        records = edited.to_dict("records")
-        meta = st.session_state.get("_structure_editor_meta") or []
-        for idx, record in enumerate(records):
-            if idx < len(meta):
-                record["_role_original"] = meta[idx]["_role_original"]
-                record["_text_key"] = meta[idx]["_text_key"]
-        return overrides_from_editor(records)
+            df = pd.DataFrame(
+                [
+                    {
+                        "Incluir": r["Incluir"],
+                        "Detectado como": r["Detectado como"],
+                        "Apartado canónico": r["Apartado canónico"],
+                        "Confianza": r["Confianza"],
+                        "Palabras": r["Palabras"],
+                        "% del cuerpo": r["% del cuerpo"],
+                    }
+                    for r in base_rows
+                ]
+            )
+            edited = st.data_editor(
+                df,
+                hide_index=True,
+                disabled=["Detectado como", "Confianza", "Palabras", "% del cuerpo"],
+                column_config={
+                    "Incluir": st.column_config.CheckboxColumn("Incluir", default=True),
+                    "Apartado canónico": st.column_config.SelectboxColumn(
+                        "Apartado canónico",
+                        options=role_options(),
+                        required=True,
+                    ),
+                },
+                use_container_width=True,
+                key="structure_editor_auto",
+            )
+        else:
+            edited = None
+
+        col_a, col_b = st.columns(2)
+        with col_a:
+            confirm_auto = st.button("Confirmar detección y auditar", type="primary", key="btn_auto_confirm")
+        with col_b:
+            skip_auto = st.button("Auditar sin cambios", key="btn_auto_skip")
+
+        if confirm_auto or skip_auto:
+            if not sections:
+                return {"mode": "overrides", "overrides": []}
+            if skip_auto:
+                return {
+                    "mode": "overrides",
+                    "overrides": [
+                        {
+                            "role_original": s.get("role"),
+                            "confirmed_role": s.get("role"),
+                            "include": True,
+                            "detected_as": s.get("detected_as"),
+                            "words": s.get("words", 0),
+                        }
+                        for s in sections
+                    ],
+                }
+            records = edited.to_dict("records") if edited is not None else []
+            meta = st.session_state.get("_structure_editor_meta") or []
+            for idx, record in enumerate(records):
+                if idx < len(meta):
+                    record["_role_original"] = meta[idx]["_role_original"]
+                    record["_text_key"] = meta[idx]["_text_key"]
+            return {"mode": "overrides", "overrides": overrides_from_editor(records)}
+
+    with tab_manual:
+        st.markdown("### Pegue su tabla de contenido")
+        st.caption(
+            "Un título por línea. Puede indicar el rol canónico con `|` "
+            "(metodologia, resultados, discusion, objetivos, marco_teorico, …)."
+        )
+        c1, c2 = st.columns(2)
+        with c1:
+            if st.button("Cargar plantilla canónica", key="btn_tpl_canonical"):
+                st.session_state["manual_outline_text"] = CANONICAL_TEMPLATE_OUTLINE
+                st.rerun()
+        with c2:
+            if st.button("Limpiar", key="btn_tpl_clear"):
+                st.session_state["manual_outline_text"] = ""
+                st.rerun()
+
+        outline_text = st.text_area(
+            "Índice / capítulos",
+            value=st.session_state.get("manual_outline_text", ""),
+            height=280,
+            placeholder=MANUAL_OUTLINE_PLACEHOLDER,
+            key="manual_outline_area",
+        )
+        st.session_state["manual_outline_text"] = outline_text
+
+        parsed_entries = parse_manual_outline(outline_text)
+        if parsed_entries:
+            import pandas as pd
+
+            preview = pd.DataFrame(
+                [
+                    {
+                        "Incluir": e.get("include", True),
+                        "Título en el documento": e.get("title", ""),
+                        "Apartado canónico": ROLE_LABELS.get(e.get("role", "otros"), ROLE_LABELS["otros"]),
+                    }
+                    for e in parsed_entries
+                ]
+            )
+            edited_manual = st.data_editor(
+                preview,
+                hide_index=True,
+                column_config={
+                    "Incluir": st.column_config.CheckboxColumn("Incluir", default=True),
+                    "Título en el documento": st.column_config.TextColumn("Título en el documento", width="large"),
+                    "Apartado canónico": st.column_config.SelectboxColumn(
+                        "Apartado canónico",
+                        options=role_options(),
+                        required=True,
+                    ),
+                },
+                num_rows="dynamic",
+                use_container_width=True,
+                key="manual_outline_editor",
+            )
+            st.caption(f"{len(edited_manual)} entradas listas. SAVT buscará cada título en el PDF y cortará los bloques.")
+        else:
+            edited_manual = None
+            st.info("Pegue al menos 3–4 títulos de su índice (por ejemplo CAPÍTULO I, MÉTODOS, RESULTADOS…).")
+
+        confirm_manual = st.button(
+            "Localizar títulos y auditar con mi estructura",
+            type="primary",
+            key="btn_manual_confirm",
+            disabled=not parsed_entries,
+        )
+        if confirm_manual and edited_manual is not None:
+            from savt.structure_confirm import label_to_role
+
+            entries = []
+            for row in edited_manual.to_dict("records"):
+                title = str(row.get("Título en el documento") or "").strip()
+                if not title:
+                    continue
+                role = label_to_role(str(row.get("Apartado canónico") or ROLE_LABELS["otros"]))
+                entries.append(
+                    {
+                        "title": title,
+                        "role": role,
+                        "include": bool(row.get("Incluir", True)),
+                    }
+                )
+            if len(entries) < 2:
+                st.error("Ingrese al menos dos títulos válidos.")
+            else:
+                return {"mode": "manual", "entries": entries}
+
     return None
 
 
@@ -937,11 +1037,11 @@ def _run_app() -> None:
     )
 
     if not uploaded:
-        for key in ("parsed_doc", "detected_sections", "structure_ready", "report"):
+        for key in ("parsed_doc", "detected_sections", "structure_ready", "report", "manual_outline_text"):
             st.session_state.pop(key, None)
         st.info(
             "Suba un archivo .docx o .pdf para iniciar la pre-auditoría académica. "
-            "Primero se detecta la estructura (editable) y luego se audita. "
+            "Podrá confirmar la estructura detectada o **pegar su índice manualmente**. "
             "Seleccione el perfil institucional en la barra lateral."
         )
         st.divider()
@@ -951,7 +1051,7 @@ def _run_app() -> None:
     # Nuevo archivo: limpiar estado de estructura/informe previos.
     if st.session_state.get("uploaded_name") != uploaded.name:
         st.session_state["uploaded_name"] = uploaded.name
-        for key in ("parsed_doc", "detected_sections", "structure_ready", "report"):
+        for key in ("parsed_doc", "detected_sections", "structure_ready", "report", "manual_outline_text"):
             st.session_state.pop(key, None)
 
     parsed = st.session_state.get("parsed_doc")
@@ -973,27 +1073,47 @@ def _run_app() -> None:
             st.session_state.pop("report", None)
             st.rerun()
         st.info(
-            "Paso 1: detectar cómo está organizada la tesis. "
-            "Podrá corregir apartados mal asignados antes de auditar."
+            "Paso 1: detectar la estructura automática. "
+            "Si no coincide con su tesis, use la pestaña **Ingresar índice manualmente**."
         )
         st.divider()
         render_user_feedback(context={"filename": uploaded.name})
         return
 
-    overrides = None
+    structure_choice = None
     if not st.session_state.get("report"):
-        overrides = render_structure_confirmation(
+        structure_choice = render_structure_confirmation(
             detected,
             structure_source=str(parsed.get("structure_source") or ""),
         )
-        if overrides is None:
+        if structure_choice is None:
             st.divider()
             render_user_feedback(context={"filename": uploaded.name})
             return
 
-        from savt.structure_confirm import apply_section_overrides
+        from savt.structure_confirm import apply_manual_outline, apply_section_overrides
 
-        parsed = apply_section_overrides(parsed, overrides)
+        if structure_choice.get("mode") == "manual":
+            parsed = apply_manual_outline(parsed, structure_choice.get("entries") or [])
+            missing = parsed.get("manual_missing_titles") or []
+            if missing:
+                st.warning(
+                    "No se localizaron en el PDF estos títulos (revise ortografía o acorte el texto): "
+                    + "; ".join(missing[:8])
+                    + ("…" if len(missing) > 8 else "")
+                )
+            found = len(parsed.get("index_sections") or [])
+            if found < 2:
+                st.error(
+                    "Con la estructura manual solo se localizaron menos de 2 apartados en el texto. "
+                    "Ajuste los títulos para que coincidan con el PDF y reintente."
+                )
+                st.divider()
+                render_user_feedback(context={"filename": uploaded.name})
+                return
+            st.session_state["detected_sections"] = None  # se regenera en auditoría
+        else:
+            parsed = apply_section_overrides(parsed, structure_choice.get("overrides") or [])
         st.session_state["parsed_doc"] = parsed
 
         progress_bar = st.progress(0.0)
