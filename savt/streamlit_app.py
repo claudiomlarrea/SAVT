@@ -331,76 +331,86 @@ def render_evaluation_and_findings(dashboard: dict) -> None:
 
 
 def render_extra_evidence(dashboard: dict) -> None:
-    """3) Auditoría por capítulo + bibliografía (según hojas Excel; sin profundidad)."""
+    """3) Citas y bibliografía con métricas claras (apariciones ≠ refs distintas ≠ entradas)."""
     from savt.section_audit import section_audit_ui_rows
 
-    st.markdown("## 3. Auditoría por apartados y bibliografía")
-    st.caption(
-        "Resumen de la hoja «Auditoría por apartado» y cobertura bibliográfica explicada. "
-        "Las citas se cuentan según el estilo detectado (APA ≠ números entre paréntesis)."
+    st.markdown("## 3. Citas por capítulo y bibliografía")
+    recon = dashboard.get("citation_reconciliation") or {}
+    bib = dashboard.get("bibliography_dashboard") or {}
+    details = bib.get("details") or {}
+
+    total_bib = bib.get("total_refs") or details.get("total_refs") or 0
+    distinct = recon.get("document_unique_cited")
+    if distinct is None:
+        distinct = bib.get("citations_found") or 0
+    appearances = recon.get("body_occurrences")
+    if appearances is None:
+        appearances = recon.get("sum_occurrences") or 0
+    uncited = recon.get("uncited_references")
+    if uncited is None:
+        uncited = max(0, int(total_bib or 0) - int(distinct or 0))
+    unmatched = bib.get("unmatched_citations") or 0
+
+    st.info(
+        "**Cómo leer los números:**\n\n"
+        f"- **{appearances} apariciones** = veces que se colocó una cita en el documento "
+        "(la misma fuente puede contarse varias veces).\n"
+        f"- **{distinct} referencias distintas** = fuentes únicas citadas al menos una vez en el texto.\n"
+        f"- **{total_bib} entradas en bibliografía** = ítems listados al final (no es lo mismo que citas).\n"
+        f"- **{uncited} no citadas** = están en la bibliografía pero no aparecen en el cuerpo."
     )
+
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Apariciones en el texto", appearances)
+    m2.metric("Refs distintas citadas", distinct)
+    m3.metric("Entradas en bibliografía", total_bib)
+    m4.metric("No citadas en el cuerpo", uncited)
+
+    st.markdown("### Por capítulo")
+    st.caption(
+        "En cada capítulo: **Veces citadas** = apariciones; **Refs distintas** = fuentes únicas en ese capítulo "
+        "(no suman al total del documento porque se repiten entre capítulos)."
+    )
+    raw_rows = recon.get("reconciliation_rows") or []
+    display_rows = []
+    for row in raw_rows:
+        apartado = _clean_cell(row.get("Apartado"))
+        if apartado == "—":
+            continue
+        tipo = _clean_cell(row.get("Tipo")) or "Apartado"
+        display_rows.append(
+            {
+                "Apartado": apartado,
+                "Rol": _clean_cell(row.get("Rol académico")),
+                "Veces citadas": _clean_cell(row.get("Apariciones cita")),
+                "Refs distintas": _clean_cell(row.get("N° refs distintos")),
+                "Tipo": tipo,
+            }
+        )
+    if display_rows:
+        st.dataframe(display_rows, hide_index=True, use_container_width=True)
+    for note in recon.get("notes") or []:
+        st.caption(note)
 
     audits = dashboard.get("section_audits") or []
     ui_rows = section_audit_ui_rows(audits)
     if ui_rows:
-        st.markdown("### Auditoría por capítulo / apartado")
-        st.dataframe(ui_rows, hide_index=True, use_container_width=True)
-    else:
-        st.info("Sin auditoría por apartado disponible.")
-
-    recon = dashboard.get("citation_reconciliation") or {}
-    with st.expander("Citas por capítulo (cuadre)", expanded=True):
-        raw_rows = recon.get("reconciliation_rows") or []
-        display_rows = []
-        for row in raw_rows:
-            apartado = _clean_cell(row.get("Apartado"))
-            if apartado == "—":
-                continue
-            tipo = _clean_cell(row.get("Tipo")) or "Apartado"
-            display_rows.append(
-                {
-                    "Apartado": apartado,
-                    "Rol académico": _clean_cell(row.get("Rol académico")),
-                    "Apariciones de cita": _clean_cell(row.get("Apariciones cita")),
-                    "Referencias distintas": _clean_cell(row.get("N° refs distintos")),
-                    "Tipo": tipo,
-                }
-            )
-        if display_rows:
-            st.dataframe(display_rows, hide_index=True, use_container_width=True)
-        for note in recon.get("notes") or []:
-            st.caption(note)
-        if not display_rows and not recon.get("notes"):
-            st.caption("Sin cuadre de citas disponible.")
+        with st.expander("Estado académico por capítulo", expanded=False):
+            st.dataframe(ui_rows, hide_index=True, use_container_width=True)
 
     st.markdown("### Bibliografía — cobertura")
-    bib = dashboard.get("bibliography_dashboard") or {}
-    details = bib.get("details") or {}
-    recon = dashboard.get("citation_reconciliation") or {}
-    total = bib.get("total_refs") or details.get("total_refs") or 0
-    cited = recon.get("document_unique_cited")
-    if cited is None:
-        cited = bib.get("citations_found") or details.get("citations_found") or 0
-    unmatched = bib.get("unmatched_citations") or details.get("unmatched_count") or 0
-    uncited = recon.get("uncited_references")
-    if uncited is None:
-        uncited = details.get("uncited_in_body") or max(0, int(total or 0) - int(cited or 0))
     coverage = bib.get("coverage") or details.get("coverage") or "—"
     doi_bad = len(details.get("doi_invalid") or [])
     doi_miss = len(details.get("doi_not_resolved") or [])
     out_period = bib.get("out_of_period") or 0
     period_start = details.get("period_start")
 
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Entradas en bibliografía", total)
-    c2.metric("Citadas en el texto", cited)
-    c3.metric("No citadas en el cuerpo", uncited)
-    c4.metric("Citas sin emparejar", unmatched)
-
     st.markdown(
         f"**Estilo:** {_clean_cell(bib.get('style') or details.get('style') or 'APA')} · "
         f"**Cobertura:** {_clean_cell(coverage)}"
     )
+    if unmatched:
+        st.caption(f"Citas del texto sin emparejar con la bibliografía: **{unmatched}**")
 
     reasons: list[str] = []
     if coverage == "requiere revisión":
@@ -472,12 +482,9 @@ def render_executive_report(dashboard: dict, report, base_name: str) -> None:
     recon = dashboard.get("citation_reconciliation") or {}
     meta1, meta2, meta3, meta4 = st.columns(4)
     meta1.metric("Palabras (cuerpo)", report.word_count if report else "—")
-    meta2.metric("Entradas bibliográficas", bib.get("total_refs") or 0)
-    meta3.metric("Refs citadas en texto", recon.get("document_unique_cited") or bib.get("citations_found") or 0)
-    meta4.metric(
-        "Estilo",
-        (bib.get("style") or report.metadata.get("citation_style") or "—") if report else "—",
-    )
+    meta2.metric("Apariciones de cita", recon.get("body_occurrences") or "—")
+    meta3.metric("Refs distintas citadas", recon.get("document_unique_cited") or bib.get("citations_found") or 0)
+    meta4.metric("Entradas bibliografía", bib.get("total_refs") or 0)
     st.caption(
         f"Errores críticos: **{dashboard.get('errors', 0)}** · "
         f"Advertencias: **{dashboard.get('warnings', 0)}**"

@@ -137,8 +137,13 @@ def run_document_pipeline(
 
             split_body, split_bib = split_body_and_bibliography(full_text)
             if split_bib.strip():
-                body = split_body
-                bib_text = split_bib
+                if structure_source == "capitulos":
+                    # En compendios cada artículo trae REFERENCIAS: no cortar el cuerpo ahí
+                    # (se perderían capítulos posteriores). Solo usar el bloque bib para parsear.
+                    bib_text = split_bib
+                else:
+                    body = split_body
+                    bib_text = split_bib
         step2_status = "ok"
         step2_summary = (
             "Apartados por capítulos del documento (árbol jerárquico)"
@@ -205,23 +210,38 @@ def run_document_pipeline(
 
     steps.append(step3)
 
-    # —— Paso 4: ANÁLISIS DE REFERENCIAS (solo bibliografía) ——
-    cited_numbers, cited_keys = _citations_from_bibliography(bibliography, citation_style)
+    # —— Paso 4: CITAS EN EL CUERPO + ANÁLISIS DE REFERENCIAS ——
+    from savt.citations import extract_apa_citations, extract_cited_numbers, strip_embedded_bibliographies
+
+    body_for_cites = strip_embedded_bibliographies(body)
+    if citation_style == "apa":
+        cited_keys, _ = extract_apa_citations(body_for_cites)
+        cited_numbers: set[int] = set()
+    else:
+        cited_numbers = extract_cited_numbers(
+            body_for_cites,
+            max_ref=max(bibliography.keys()) if bibliography else 500,
+        )
+        cited_keys = set()
+
     refs_with_key = sum(1 for ref in bibliography.values() if ref.key or ref.raw)
     step4_status = "ok" if len(bibliography) >= 3 else "warning"
-    step4_summary = "Análisis del apartado bibliográfico completado (sin escanear el cuerpo)"
+    step4_summary = (
+        f"Cuerpo: {len(cited_keys) or len(cited_numbers)} refs distintas citadas · "
+        f"Bibliografía: {len(bibliography)} entradas"
+    )
 
     steps.append(
         _step(
             "references",
-            "4. Análisis de referencias (solo bibliografía)",
+            "4. Citas en el cuerpo y bibliografía",
             step4_status,
             step4_summary,
             total=len(bibliography),
             identifiable=refs_with_key,
             cited_keys=len(cited_keys),
             cited_numbers=len(cited_numbers),
-            body_scan=False,
+            body_scan=True,
         )
     )
 

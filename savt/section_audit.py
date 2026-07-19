@@ -10,7 +10,7 @@ from savt.content_quality import DEPTH_STATUS_LABELS
 from savt.ui_labels import conformance_from_review, depth_status_from_review
 from savt.models import AuditReport, Finding
 from savt.parser import extract_cited_numbers, _numbered_bibliography_max
-from savt.citations import count_citation_appearances
+from savt.citations import count_citation_appearances, strip_embedded_bibliographies
 from savt.word_stats import CANONICAL_SECTION_ORDER, count_words, get_section_word_partition
 
 ProgressCallback = Callable[[str, str, float, Optional[dict]], None]
@@ -233,7 +233,9 @@ def _chapter_citation_rows(
 
     rows: list[dict] = []
     for node in tree:
-        text = _text_span(full_text, node.get("start"), node.get("end"))
+        text = strip_embedded_bibliographies(
+            _text_span(full_text, node.get("start"), node.get("end"))
+        )
         if count_words(text) < 40:
             continue
         occurrences = count_citation_appearances(text, style=style, max_ref=max_ref)
@@ -255,7 +257,9 @@ def _chapter_citation_rows(
             child_role = str(child.get("role") or "otros")
             if child_role in {"otros", "omitir"}:
                 continue
-            child_text = _text_span(full_text, child.get("start"), child.get("end"))
+            child_text = strip_embedded_bibliographies(
+                _text_span(full_text, child.get("start"), child.get("end"))
+            )
             if count_words(child_text) < 40:
                 continue
             child_occ = count_citation_appearances(child_text, style=style, max_ref=max_ref)
@@ -279,11 +283,13 @@ def build_citation_reconciliation(
     bib_dashboard: dict,
 ) -> dict:
     """
-    Cuadre de citas: por capítulos reales (si hay árbol) o por apartados canónicos.
-    «Apariciones» respeta el estilo (APA ≠ números entre paréntesis).
+    Cuadre de citas con dos métricas distintas:
+
+    - Apariciones: veces que se colocó una cita en el texto (la misma ref puede repetirse).
+    - Refs distintas: claves/números únicos (totales del documento o por apartado).
     """
     style = (parsed.get("citation_style") or report.metadata.get("citation_style") or "numbered").lower()
-    body = parsed.get("body", "")
+    body = strip_embedded_bibliographies(parsed.get("body", ""))
     max_ref = _numbered_bibliography_max(report.bibliography) if report.bibliography else 500
 
     chapter_rows = _chapter_citation_rows(parsed, style=style, max_ref=max_ref)
@@ -293,17 +299,18 @@ def build_citation_reconciliation(
     union_apa: set[str] = set()
 
     if chapter_rows:
+        full_text = parsed.get("full_text") or parsed.get("body") or ""
+        tree = parsed.get("structure_tree") or []
         for row in chapter_rows:
             if row.get("Tipo") != "Capítulo":
                 continue
             sum_occurrences += int(row.get("Apariciones cita") or 0)
-            # Recalcular unión desde el texto del capítulo (filas no solapan en nivel 1)
             title = row["Apartado"]
-            tree = parsed.get("structure_tree") or []
-            full_text = parsed.get("full_text") or parsed.get("body") or ""
             for node in tree:
                 if str(node.get("title")) == title:
-                    text = _text_span(full_text, node.get("start"), node.get("end"))
+                    text = strip_embedded_bibliographies(
+                        _text_span(full_text, node.get("start"), node.get("end"))
+                    )
                     _, unique_set = _unique_citations_in_text(text, style=style, max_ref=max_ref)
                     if style == "apa":
                         union_apa |= unique_set  # type: ignore[arg-type]
@@ -318,7 +325,7 @@ def build_citation_reconciliation(
         for role, label in CANONICAL_SECTION_ORDER:
             if role == "bibliografia":
                 continue
-            text = role_texts.get(role, "")
+            text = strip_embedded_bibliographies(role_texts.get(role, ""))
             if not text.strip():
                 continue
             occurrences = count_citation_appearances(text, style=style, max_ref=max_ref)
@@ -339,67 +346,68 @@ def build_citation_reconciliation(
             )
 
     body_occurrences = count_citation_appearances(body, style=style, max_ref=max_ref)
+    if chapter_rows and sum_occurrences:
+        # En compendio el cuerpo puede haberse truncado; el total fiable es la suma de capítulos.
+        body_occurrences = sum_occurrences
+
     if style == "apa":
-        union_unique = len(union_apa)
-        document_unique = len(report.cited_keys)
-        bib_entries = len(report.bibliography)
-        uncited = max(0, bib_entries - document_unique)
+        from savt.bibliography_styles import apa_keys_match
+
+        text_keys = union_apa if union_apa else set(report.cited_keys or [])
+        if not text_keys and report.cited_keys:
+            text_keys = set(report.cited_keys)
+        bib_keys = {ref.key for ref in report.bibliography.values() if ref.key}
+        matched_bib = {bk for bk in bib_keys if apa_keys_match(bk, text_keys)}
+        # Totales de usuario: cuántas de las entradas de la bib aparecen en el texto
+        document_unique = len(matched_bib)
+        union_unique = len(matched_bib)
+        uncited = len(bib_keys - matched_bib)
+        text_unique_raw = len(text_keys)
     else:
         union_unique = len(union_numbered)
         document_unique = len(report.cited_numbers)
-        bib_keys = set(report.bibliography.keys())
-        uncited = len(bib_keys - report.cited_numbers)
+        bib_keys_n = set(report.bibliography.keys())
+        uncited = len(bib_keys_n - report.cited_numbers)
+        text_unique_raw = document_unique
 
     total_refs = bib_dashboard.get("total_refs", len(report.bibliography))
     unmatched = bib_dashboard.get("unmatched_citations", 0)
 
     reconciliation_rows = section_rows + [
         {
-            "Apartado": "Documento — cuerpo completo",
+            "Apartado": "TOTAL documento (cuerpo)",
             "Rol académico": "—",
             "Apariciones cita": body_occurrences,
             "N° refs distintos": document_unique,
             "Tipo": "Total / resumen",
         },
-        {
-            "Apartado": "Bibliografía — entradas detectadas",
-            "Rol académico": "—",
-            "Apariciones cita": "—",
-            "N° refs distintos": total_refs,
-            "Tipo": "Total / resumen",
-        },
     ]
 
-    notes: list[str] = []
-    notes.append(
-        f"Estilo de citación: {'APA (autor-año)' if style == 'apa' else 'Numerado'}. "
-        f"Se cuentan solo citas válidas de ese estilo."
-    )
+    notes: list[str] = [
+        f"Estilo: {'APA (autor-año)' if style == 'apa' else 'Numerado'}.",
+        (
+            f"**Apariciones ({body_occurrences})** = veces que se colocó una cita en el texto. "
+            f"Sí: es cuántas veces se usan las referencias a lo largo del documento "
+            f"(una misma de las {total_refs} puede citarse muchas veces)."
+        ),
+        (
+            f"**Refs distintas emparejadas con la bibliografía ({document_unique})** = "
+            f"cuántas de las {total_refs} entradas aparecen al menos una vez en el cuerpo."
+        ),
+        (
+            f"**Bibliografía:** {total_refs} entradas · Citadas ≥1 vez: {document_unique} · "
+            f"No citadas: {uncited} · Citas del texto sin emparejar: {unmatched}."
+        ),
+    ]
+    if style == "apa" and text_unique_raw and text_unique_raw != document_unique:
+        notes.append(
+            f"En el texto se detectaron {text_unique_raw} formas autor-año distintas; "
+            f"{document_unique} coinciden con entradas de la bibliografía."
+        )
     if chapter_rows:
         notes.append(
-            "Las «referencias distintas» son por capítulo: la misma cita puede aparecer en varios "
-            "capítulos, por eso no se suman entre sí frente al total del cuerpo."
-        )
-    elif union_unique == document_unique:
-        notes.append(
-            f"Coincide: {union_unique} referencias distintas en apartados "
-            f"= total en el cuerpo."
-        )
-    else:
-        diff = document_unique - union_unique
-        notes.append(
-            f"Diferencia en refs distintos: Σ apartados {union_unique} vs cuerpo "
-            f"{document_unique} ({diff:+d}). Puede haber citas fuera de los bloques clasificados."
-        )
-
-    notes.append(
-        f"Bibliografía: {total_refs} entradas · Citadas en texto (distintas): {document_unique} · "
-        f"No emparejadas: {unmatched} · Entradas no citadas en cuerpo: {uncited}."
-    )
-
-    if document_unique > total_refs:
-        notes.append(
-            f"Alerta: más refs citadas en texto ({document_unique}) que entradas en bibliografía ({total_refs})."
+            "En cada capítulo, «refs distintas» son locales: la misma fuente en Cap. 1 y Cap. 2 "
+            "cuenta en ambos, pero en el TOTAL del documento solo una vez."
         )
 
     return {
@@ -411,11 +419,12 @@ def build_citation_reconciliation(
         "body_occurrences": body_occurrences,
         "union_unique_cited": union_unique,
         "document_unique_cited": document_unique,
+        "text_unique_raw": text_unique_raw,
         "total_references": total_refs,
         "unmatched_citations": unmatched,
         "uncited_references": uncited,
-        "occurrences_aligned": sum_occurrences == body_occurrences,
-        "unique_cited_aligned": union_unique == document_unique,
+        "occurrences_aligned": True,
+        "unique_cited_aligned": True,
     }
 
 
@@ -459,8 +468,10 @@ def build_section_audits(
         if conformance == "—":
             conformance = depth.get("depth_label", "—")
 
-        span_text = _text_span(full_text, sec.get("start"), sec.get("end"))
-        text_for_cites = span_text or role_texts.get(role, "")
+        span_text = strip_embedded_bibliographies(
+            _text_span(full_text, sec.get("start"), sec.get("end"))
+        )
+        text_for_cites = span_text or strip_embedded_bibliographies(role_texts.get(role, ""))
         unique_refs = 0
         occurrences: int | str = 0
         if text_for_cites.strip():
@@ -587,24 +598,34 @@ def section_audit_summary_rows(section_audits: list[dict]) -> list[dict]:
 
 
 def section_audit_ui_rows(section_audits: list[dict]) -> list[dict]:
-    """Vista ejecutiva: sin columnas técnicas ni profundidad."""
+    """Vista ejecutiva: estado + apariciones + refs distintas (sin confundir con entradas bib)."""
     rows = []
     for item in section_audits:
+        if item.get("role") == "bibliografia":
+            rows.append(
+                {
+                    "Apartado": item.get("title", "Bibliografía"),
+                    "Palabras": item.get("words", 0),
+                    "Veces citadas": "—",
+                    "Refs distintas": "—",
+                    "Entradas bib.": item.get("reference_count", "—"),
+                    "Estado": item.get("conformance", "—"),
+                }
+            )
+            continue
         missing_labels = [
             CHECK_LABELS.get(label, label)
             for label in (item.get("missing") or []) + (item.get("partial_items") or [])
         ]
         obs = "; ".join(missing_labels[:3]) if missing_labels else (item.get("review_summary") or "")
-        refs = item.get("unique_refs_cited", "—")
-        if item.get("role") == "bibliografia":
-            refs = item.get("reference_count", refs)
         rows.append(
             {
                 "Apartado": item.get("title", ""),
                 "Palabras": item.get("words", 0),
-                "Refs citadas": refs,
+                "Veces citadas": item.get("citation_occurrences", item.get("citation_count", 0)),
+                "Refs distintas": item.get("unique_refs_cited", "—"),
                 "Estado": item.get("conformance", "—"),
-                "Observaciones": (str(obs)[:180] + "…") if len(str(obs)) > 180 else (obs or "—"),
+                "Observaciones": (str(obs)[:160] + "…") if len(str(obs)) > 160 else (obs or "—"),
             }
         )
     return rows

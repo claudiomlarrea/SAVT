@@ -289,6 +289,35 @@ def extract_apa_citations(body: str) -> tuple[set[str], list[tuple[str, str]]]:
     return apa_keys, detected.apa_contexts
 
 
+def strip_embedded_bibliographies(text: str) -> str:
+    """
+    Quita bloques REFERENCIAS / BIBLIOGRAFÍA dentro del texto (comunes en tesis por artículos).
+    Evita contar años de la lista bibliográfica como si fueran citas en el cuerpo.
+    """
+    if not text:
+        return ""
+    pattern = re.compile(
+        r"(?im)(?:^|\n)\s*(?:\d+\.?\s*)?(?:REFERENCIAS(?:\s+BIBLIOGR[AÁ]FICAS)?|BIBLIOGRAF[IÍ]A)\b[^\n]*\n",
+    )
+    parts: list[str] = []
+    last = 0
+    for match in pattern.finditer(text):
+        parts.append(text[last : match.start()])
+        # Saltar hasta el próximo capítulo o final
+        rest = text[match.end() :]
+        next_cap = re.search(
+            r"(?im)(?:^|\n)\s*CAP[IÍ]TULO\s+([IVXLC]+|\d{1,2})\b",
+            rest,
+        )
+        if next_cap:
+            last = match.end() + next_cap.start()
+        else:
+            last = len(text)
+            break
+    parts.append(text[last:])
+    return "".join(parts)
+
+
 def count_numeric_citation_appearances(body: str, max_ref: int = 500) -> int:
     """Cuenta apariciones de citas numeradas (Vancouver/IEEE). No usar en tesis APA."""
     appearances = 0
