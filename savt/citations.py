@@ -290,18 +290,35 @@ def extract_apa_citations(body: str) -> tuple[set[str], list[tuple[str, str]]]:
 
 
 def count_numeric_citation_appearances(body: str, max_ref: int = 500) -> int:
+    """Cuenta apariciones de citas numeradas (Vancouver/IEEE). No usar en tesis APA."""
     appearances = 0
     for pattern in (NUMERIC_CITATION_PATTERN, BRACKET_NUMERIC_CITATION):
         for match in pattern.finditer(body):
             if not _is_false_positive_numeric_citation(match.group(1), body, match.start()):
                 appearances += 1
-    appearances += len(APA_CITATION_PATTERN.findall(body))
-    appearances += len(BRACKET_APA_CITATION_PATTERN.findall(body))
-    appearances += len(HARVARD_CITATION_PATTERN.findall(body))
-    appearances += len(LAW_CITATION_PATTERN.findall(body))
-    appearances += len(NORM_CITATION_PATTERN.findall(body))
-    appearances += len(DOI_CITATION_PATTERN.findall(body))
     return appearances
+
+
+def count_apa_citation_appearances(body: str) -> int:
+    """Cuenta apariciones de citas autor-año validadas (APA/Harvard), sin (n), (p) ni años sueltos."""
+    if not body:
+        return 0
+    appearances = 0
+    for pattern in (APA_CITATION_PATTERN, BRACKET_APA_CITATION_PATTERN, HARVARD_CITATION_PATTERN):
+        for match in pattern.finditer(body):
+            if _apa_inner_valid(match.group(1)):
+                appearances += 1
+    appearances += len(NARRATIVE_APA_PATTERN.findall(body))
+    appearances += len(NARRATIVE_APA_ET_AL_PATTERN.findall(body))
+    return appearances
+
+
+def count_citation_appearances(body: str, *, style: str = "numbered", max_ref: int = 500) -> int:
+    """Apariciones de cita según el estilo detectado del documento."""
+    normalized = (style or "numbered").lower()
+    if normalized == "apa":
+        return count_apa_citation_appearances(body)
+    return count_numeric_citation_appearances(body, max_ref=max_ref)
 
 
 def _audit_numbered_citations(parsed: dict, keywords: list[str]) -> list[Finding]:

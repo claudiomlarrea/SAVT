@@ -6,7 +6,6 @@ from typing import Any
 from savt.bibliography_styles import (
     apa_keys_match,
     citation_present_in_bibliography_text,
-    count_references_in_text,
     is_institutional_citation_key,
     topical_match,
 )
@@ -91,11 +90,19 @@ def analyze_unmatched_apa(parsed: dict, bibliography: dict[int, ReferenceEntry])
 def analyze_out_of_period(
     bibliography: dict[int, ReferenceEntry], body: str
 ) -> tuple[int, int | None, list[dict]]:
+    from datetime import datetime
+
     year_range = re.search(r"(20\d{2})\s*[–-]\s*(20\d{2})", body)
     if not year_range:
         return 0, None, []
     start_year = int(year_range.group(1))
     end_year = int(year_range.group(2))
+    current = datetime.now().year
+    # Descartar rangos absurdos (p. ej. 2095–2099 por ruido OCR / fórmulas).
+    if start_year > current + 1 or end_year > current + 2:
+        return 0, None, []
+    if end_year < start_year or (end_year - start_year) > 40:
+        return 0, None, []
     items: list[dict] = []
     for num, ref in sorted(bibliography.items()):
         if ref.year and _plausible_year(ref.year) and int(ref.year) < start_year:
@@ -353,6 +360,19 @@ def build_bibliography_details(
 
     unmatched_count = len(unmatched_apa) if style == "apa" else 0
 
+    if style == "apa":
+        cited_keys = parsed.get("cited_keys") or set()
+        cited_in_text = len(
+            {
+                key
+                for key in cited_keys
+                if "|" in str(key)
+                and not str(key).startswith(("law|", "norm|", "doi|", "pmid|", "isbn|", "url|"))
+            }
+        )
+    else:
+        cited_in_text = len(parsed.get("cited_numbers") or set())
+
     coverage = "adecuada"
     if len(bibliography) == 0:
         coverage = "requiere revisión"
@@ -364,7 +384,9 @@ def build_bibliography_details(
     details = {
         "style": "APA" if style == "apa" else "Vancouver numerado",
         "total_refs": len(bibliography),
-        "citations_found": count_references_in_text(parsed, bibliography),
+        "citations_found": cited_in_text,
+        "bibliography_entries": len(bibliography),
+        "uncited_in_body": max(0, len(bibliography) - cited_in_text),
         "unmatched_count": unmatched_count,
         "unmatched_apa": unmatched_apa,
         "out_of_period": out_of_period,

@@ -81,8 +81,15 @@ def build_report_xlsx(report: AuditReport, dashboard: dict) -> bytes:
         {"Campo": "Checklist", "Valor": checklist.get("status", "—")},
         {"Campo": "Palabras (cuerpo)", "Valor": report.word_count},
         {
-            "Campo": "Referencias totales utilizadas",
-            "Valor": (dashboard.get("bibliography_dashboard") or {}).get("citations_found", 0),
+            "Campo": "Entradas en bibliografía",
+            "Valor": (dashboard.get("bibliography_dashboard") or {}).get("total_refs", 0),
+        },
+        {
+            "Campo": "Referencias citadas en texto",
+            "Valor": (dashboard.get("citation_reconciliation") or {}).get(
+                "document_unique_cited",
+                (dashboard.get("bibliography_dashboard") or {}).get("citations_found", 0),
+            ),
         },
         {
             "Campo": "Páginas",
@@ -159,30 +166,16 @@ def build_report_xlsx(report: AuditReport, dashboard: dict) -> bytes:
         ws_recon = wb.create_sheet("Cuadre citas")
         recon_rows = list(recon["reconciliation_rows"])
         for note in recon.get("notes") or []:
-            recon_rows.append({"Apartado": "Nota", "Apariciones cita": note, "N° refs distintos": ""})
+            recon_rows.append(
+                {
+                    "Apartado": "Nota",
+                    "Rol académico": "",
+                    "Apariciones cita": note,
+                    "N° refs distintos": "",
+                    "Tipo": "",
+                }
+            )
         _write_sheet_from_rows(ws_recon, recon_rows, "Cuadre de citas y referencias")
-
-    # --- Profundidad académica ---
-    content = dashboard.get("content_dashboard") or {}
-    depth_rows = []
-    for item in content.get("section_depth") or []:
-        if item.get("depth_status") == "missing" and item.get("words", 0) <= 0:
-            continue
-        depth_rows.append(
-            {
-                "Apartado": item.get("title", ""),
-                "Detectado como": item.get("detected_as", ""),
-                "Palabras": item.get("words", 0),
-                "Apariciones cita": item.get("citation_count", 0),
-                "Densidad citas/100 pal.": item.get("citation_density", 0),
-                "Marcadores críticos": item.get("critical_markers", 0),
-                "Ind. hallazgos": item.get("result_markers", 0) or "—",
-                "Profundidad": item.get("depth_label", ""),
-                "Motivo": item.get("depth_reason", ""),
-            }
-        )
-    ws_depth = wb.create_sheet("Profundidad académica")
-    _write_sheet_from_rows(ws_depth, depth_rows, "Profundidad académica por apartado")
 
     # --- Checklist ---
     checklist_rows = [

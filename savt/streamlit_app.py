@@ -331,26 +331,39 @@ def render_evaluation_and_findings(dashboard: dict) -> None:
 
 
 def render_extra_evidence(dashboard: dict) -> None:
-    """3) Evidencia adicional: tablas legibles en español, sin None ni columnas técnicas."""
-    st.markdown("## 3. Evidencia adicional")
-    st.caption("Citas, profundidad académica y cifras de bibliografía (vista simplificada).")
+    """3) Auditoría por capítulo + bibliografía (según hojas Excel; sin profundidad)."""
+    from savt.section_audit import section_audit_ui_rows
 
-    with st.expander("Cuadre de citas y referencias", expanded=True):
-        recon = dashboard.get("citation_reconciliation") or {}
+    st.markdown("## 3. Auditoría por apartados y bibliografía")
+    st.caption(
+        "Resumen de la hoja «Auditoría por apartado» y cobertura bibliográfica explicada. "
+        "Las citas se cuentan según el estilo detectado (APA ≠ números entre paréntesis)."
+    )
+
+    audits = dashboard.get("section_audits") or []
+    ui_rows = section_audit_ui_rows(audits)
+    if ui_rows:
+        st.markdown("### Auditoría por capítulo / apartado")
+        st.dataframe(ui_rows, hide_index=True, use_container_width=True)
+    else:
+        st.info("Sin auditoría por apartado disponible.")
+
+    recon = dashboard.get("citation_reconciliation") or {}
+    with st.expander("Citas por capítulo (cuadre)", expanded=True):
         raw_rows = recon.get("reconciliation_rows") or []
         display_rows = []
         for row in raw_rows:
             apartado = _clean_cell(row.get("Apartado"))
             if apartado == "—":
                 continue
+            tipo = _clean_cell(row.get("Tipo")) or "Apartado"
             display_rows.append(
                 {
                     "Apartado": apartado,
+                    "Rol académico": _clean_cell(row.get("Rol académico")),
                     "Apariciones de cita": _clean_cell(row.get("Apariciones cita")),
                     "Referencias distintas": _clean_cell(row.get("N° refs distintos")),
-                    "Tipo": _clean_cell(row.get("Tipo")) if row.get("Tipo") else (
-                        "Total / resumen" if row.get("is_total") else "Apartado"
-                    ),
+                    "Tipo": tipo,
                 }
             )
         if display_rows:
@@ -360,50 +373,83 @@ def render_extra_evidence(dashboard: dict) -> None:
         if not display_rows and not recon.get("notes"):
             st.caption("Sin cuadre de citas disponible.")
 
-    with st.expander("Profundidad académica", expanded=False):
-        depth = (dashboard.get("content_dashboard") or {}).get("section_depth") or []
-        rows = []
-        for d in depth:
-            words = int(d.get("words") or 0)
-            status = d.get("depth_status")
-            if words <= 0 and status in {None, "missing"}:
-                continue
-            apartado = _clean_cell(d.get("title") or d.get("detected_as") or d.get("label"))
-            if apartado == "—":
-                continue
-            motivo = _clean_cell(d.get("depth_reason") or d.get("reason") or d.get("motivo"))
-            rows.append(
-                {
-                    "Apartado": apartado,
-                    "Palabras": words if words else "—",
-                    "Profundidad": _depth_label_es(
-                        d.get("depth_label") or d.get("depth_status_label") or d.get("depth_status")
-                    ),
-                    "Motivo": motivo,
-                }
-            )
-        if rows:
-            st.dataframe(rows, hide_index=True, use_container_width=True)
-        else:
-            st.caption("Sin datos de profundidad.")
+    st.markdown("### Bibliografía — cobertura")
+    bib = dashboard.get("bibliography_dashboard") or {}
+    details = bib.get("details") or {}
+    recon = dashboard.get("citation_reconciliation") or {}
+    total = bib.get("total_refs") or details.get("total_refs") or 0
+    cited = recon.get("document_unique_cited")
+    if cited is None:
+        cited = bib.get("citations_found") or details.get("citations_found") or 0
+    unmatched = bib.get("unmatched_citations") or details.get("unmatched_count") or 0
+    uncited = recon.get("uncited_references")
+    if uncited is None:
+        uncited = details.get("uncited_in_body") or max(0, int(total or 0) - int(cited or 0))
+    coverage = bib.get("coverage") or details.get("coverage") or "—"
+    doi_bad = len(details.get("doi_invalid") or [])
+    doi_miss = len(details.get("doi_not_resolved") or [])
+    out_period = bib.get("out_of_period") or 0
+    period_start = details.get("period_start")
 
-    with st.expander("Bibliografía (cifras)", expanded=False):
-        bib = dashboard.get("bibliography_dashboard") or {}
-        details = bib.get("details") or {}
-        total = bib.get("total") or details.get("total") or bib.get("entry_count") or "—"
-        st.write(
-            f"Estilo: **{_clean_cell(bib.get('style') or details.get('style') or 'APA')}** · "
-            f"Entradas detectadas: **{_clean_cell(total)}**"
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Entradas en bibliografía", total)
+    c2.metric("Citadas en el texto", cited)
+    c3.metric("No citadas en el cuerpo", uncited)
+    c4.metric("Citas sin emparejar", unmatched)
+
+    st.markdown(
+        f"**Estilo:** {_clean_cell(bib.get('style') or details.get('style') or 'APA')} · "
+        f"**Cobertura:** {_clean_cell(coverage)}"
+    )
+
+    reasons: list[str] = []
+    if coverage == "requiere revisión":
+        if doi_miss:
+            reasons.append(
+                f"**Por qué la cobertura es insuficiente:** {doi_miss} DOI no se encontraron en Crossref "
+                "(mal tipados, incompletos o retirados)."
+            )
+        if doi_bad:
+            reasons.append(f"**DOI inválidos:** {doi_bad} entradas con formato incorrecto.")
+        if unmatched and unmatched > 5:
+            reasons.append(
+                f"**Citas sin entrada:** {unmatched} citas del texto no coinciden con la bibliografía."
+            )
+        if not reasons:
+            reasons.append(
+                "**Por qué requiere revisión:** no se pudo verificar la consistencia "
+                "citas ↔ bibliografía ↔ DOI."
+            )
+    if out_period:
+        period_txt = f" (desde {period_start})" if period_start else ""
+        reasons.append(
+            f"**Antigüedad:** {out_period} referencias anteriores al período metodológico detectado{period_txt}."
         )
-        for review in dashboard.get("chapter_reviews") or []:
-            if review.get("key") == "bibliografia":
-                for issue in review.get("issues") or []:
-                    st.markdown(f"- {_clean_cell(issue)}")
+    for line in reasons:
+        st.markdown(line)
+
+    bib_review = next(
+        (r for r in (dashboard.get("chapter_reviews") or []) if r.get("key") == "bibliografia"),
+        None,
+    )
+    if bib_review:
+        if bib_review.get("summary"):
+            st.write(bib_review["summary"])
+        if bib_review.get("why"):
+            st.markdown(f"**Por qué importa:** {bib_review['why']}")
+        if bib_review.get("how_to_fix"):
+            st.info(f"**Cómo corregir:** {bib_review['how_to_fix']}")
+        issues = bib_review.get("issues") or []
+        if issues:
+            st.markdown("**Hallazgos concretos:**")
+            for issue in issues:
+                st.markdown(f"- {_clean_cell(issue)}")
 
 
 def render_executive_report(dashboard: dict, report, base_name: str) -> None:
-    """Pantalla principal: resultado → estructura+checklist → evaluación+hallazgos → evidencia."""
+    """Pantalla principal alineada a las hojas del Excel SAVT."""
     st.markdown("## Resultado de la auditoría")
+    st.caption("Equivalente a la hoja «Resumen» del Excel.")
     left, right = st.columns([1, 1.2])
     with left:
         st.markdown(f"### ICAI **{dashboard.get('icai', '—')}/100**")
@@ -421,6 +467,21 @@ def render_executive_report(dashboard: dict, report, base_name: str) -> None:
         st.markdown(f"**Motivo principal:** {dashboard.get('main_reason') or '—'}")
         if dashboard.get("profile_label"):
             st.caption(f"Perfil: {dashboard.get('profile_label')}")
+
+    bib = dashboard.get("bibliography_dashboard") or {}
+    recon = dashboard.get("citation_reconciliation") or {}
+    meta1, meta2, meta3, meta4 = st.columns(4)
+    meta1.metric("Palabras (cuerpo)", report.word_count if report else "—")
+    meta2.metric("Entradas bibliográficas", bib.get("total_refs") or 0)
+    meta3.metric("Refs citadas en texto", recon.get("document_unique_cited") or bib.get("citations_found") or 0)
+    meta4.metric(
+        "Estilo",
+        (bib.get("style") or report.metadata.get("citation_style") or "—") if report else "—",
+    )
+    st.caption(
+        f"Errores críticos: **{dashboard.get('errors', 0)}** · "
+        f"Advertencias: **{dashboard.get('warnings', 0)}**"
+    )
 
     st.divider()
     render_structure_and_checklist(dashboard)

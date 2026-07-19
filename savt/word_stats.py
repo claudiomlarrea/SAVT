@@ -27,9 +27,11 @@ CANONICAL_SECTION_ORDER: tuple[tuple[str, str], ...] = (
 
 
 def _partition_word_map(parsed: dict) -> tuple[dict[str, str], dict[str, dict]]:
-    index_sections = parsed.get("index_sections") or []
-    if index_sections and parsed.get("structure_source") == "index":
-        partition = dict(parsed.get("section_map") or {})
+    structure_source = str(parsed.get("structure_source") or "")
+    section_map = parsed.get("section_map") or {}
+    # Preferir el mapa real (índice / capítulos / confirmación / manual) frente a heurísticas.
+    if section_map and structure_source in {"index", "capitulos", "confirmed", "manual"}:
+        partition = dict(section_map)
         meta = dict(parsed.get("section_meta") or {})
         full_text = parsed.get("full_text", "")
         if full_text:

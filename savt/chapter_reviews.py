@@ -410,6 +410,11 @@ def build_bibliography_review(bib_dashboard: dict, warnings_list: list[dict]) ->
     out_period = bib_dashboard.get("out_of_period", 0)
     off_topic = bib_dashboard.get("possibly_off_topic", 0)
     coverage = bib_dashboard.get("coverage", "adecuada")
+    cited_in_text = bib_dashboard.get("citations_found", 0)
+    period_start = details.get("period_start")
+    doi_invalid = details.get("doi_invalid") or []
+    doi_not_resolved = details.get("doi_not_resolved") or []
+    year_mismatch = details.get("doi_year_mismatch") or []
 
     if total_refs == 0:
         return {
@@ -427,18 +432,48 @@ def build_bibliography_review(bib_dashboard: dict, warnings_list: list[dict]) ->
         }
 
     issues: list[str] = []
+    why_parts = [
+        "La bibliografía es trazable: cada cita del texto debe tener entrada y cada entrada debe ser pertinente.",
+    ]
+
     if unmatched:
-        issues.append(f"{unmatched} citas no emparejadas con la bibliografía")
+        issues.append(f"{unmatched} citas del texto no emparejadas con la bibliografía")
+        why_parts.append(
+            f"Hay {unmatched} citas en el cuerpo sin entrada coincidente: eso rompe la trazabilidad."
+        )
     if out_period:
-        issues.append(f"{out_period} referencias anteriores al período metodológico")
+        period_txt = f" (período detectado desde {period_start})" if period_start else ""
+        issues.append(f"{out_period} referencias anteriores al período metodológico{period_txt}")
+        why_parts.append(
+            "Referencias muy anteriores al período metodológico pueden cuestionar la pertinencia temporal."
+        )
     if off_topic:
         issues.append(f"{off_topic} referencias posiblemente ajenas al tema")
-    if coverage == "requiere revisión":
-        issues.append("cobertura bibliográfica insuficiente")
+        why_parts.append("Referencias ajenas al tema pueden interpretarse como relleno bibliográfico.")
+    if doi_invalid:
+        issues.append(f"{len(doi_invalid)} DOI con formato inválido")
+        why_parts.append("DOI inválidos impiden verificar la identidad de la fuente.")
+    if doi_not_resolved:
+        issues.append(f"{len(doi_not_resolved)} DOI no encontrados en Crossref")
+        why_parts.append(
+            f"La cobertura se marca insuficiente porque {len(doi_not_resolved)} DOI no resolvieron en Crossref "
+            "(pueden estar mal tipados o retirados)."
+        )
+    if year_mismatch:
+        issues.append(f"{len(year_mismatch)} años que no coinciden con Crossref")
+        why_parts.append("El año en la referencia no coincide con el registro del DOI.")
+
+    # Cobertura insuficiente = causa concreta, nunca un rótulo vacío.
+    if coverage == "requiere revisión" and not any(
+        "cobertura" in i.lower() or "doi" in i.lower() or "emparejad" in i.lower() for i in issues
+    ):
+        issues.append(
+            "cobertura insuficiente: no se pudo verificar consistencia citas↔bibliografía↔DOI"
+        )
 
     doi_warnings = [w for w in warnings_list if "DOI" in w.get("finding_title_raw", "")]
-    if doi_warnings:
-        issues.append("problemas con DOI o URLs bibliográficas")
+    if doi_warnings and not doi_invalid and not doi_not_resolved:
+        issues.append("problemas con DOI o URLs bibliográficas (ver hallazgos)")
 
     if not issues:
         return {
@@ -453,24 +488,28 @@ def build_bibliography_review(bib_dashboard: dict, warnings_list: list[dict]) ->
             "issues": [],
         }
 
-    why_parts = [
-        "La bibliografía es trazable: cada cita debe tener entrada y cada entrada debe ser pertinente.",
-    ]
-    if unmatched:
-        why_parts.append("Las citas no emparejadas impiden verificar la fuente de sus afirmaciones.")
-    if out_period:
-        why_parts.append("Referencias muy anteriores al período metodológico pueden cuestionar pertinencia temporal.")
-
     how_parts = [
-        "Revise el listado detallado en la sección Bibliografía del informe.",
+        "Revise el listado detallado en la hoja Bibliografía del Excel.",
         "Corrija autor/año en texto o complete entradas faltantes.",
     ]
-    if doi_warnings:
-        how_parts.append("Verifique DOI y URLs rotas o mal escritas.")
+    if doi_invalid or doi_not_resolved or doi_warnings:
+        how_parts.append("Verifique cada DOI en https://doi.org/ y Crossref; corrija tipografía o reemplace la fuente.")
+    if out_period:
+        how_parts.append(
+            "Si el período metodológico está mal detectado, ignore esa alerta; "
+            "si es correcto, priorice literatura del rango declarado."
+        )
 
-    status = "partial" if len(issues) <= 2 and not doi_warnings else "fail"
-    if unmatched <= 3 and not doi_warnings:
+    status = "partial" if len(issues) <= 2 and not doi_not_resolved and not doi_invalid else "fail"
+    if unmatched <= 3 and not doi_not_resolved and not doi_invalid:
         status = "partial"
+
+    uncited = max(0, total_refs - int(cited_in_text or 0)) if cited_in_text else None
+    metrics_hint = f"{total_refs} entradas"
+    if cited_in_text:
+        metrics_hint += f", ~{cited_in_text} citadas en texto"
+    if uncited:
+        metrics_hint += f", ~{uncited} no citadas en el cuerpo"
 
     return {
         "key": "bibliografia",
@@ -478,7 +517,7 @@ def build_bibliography_review(bib_dashboard: dict, warnings_list: list[dict]) ->
         "status": status,
         "ok": False,
         "partial": status == "partial",
-        "summary": "Requiere revisión: " + "; ".join(issues) + ".",
+        "summary": f"Requiere revisión ({metrics_hint}): " + "; ".join(issues) + ".",
         "why": " ".join(why_parts),
         "how_to_fix": " ".join(how_parts),
         "issues": issues,

@@ -218,6 +218,8 @@ def flatten_document_model_for_display(model: dict[str, Any]) -> list[dict[str, 
                 "path": title,
                 "source": "document_model",
                 "node_id": chapter.get("id"),
+                "start": chapter.get("start"),
+                "end": chapter.get("end"),
             }
         )
     return rows

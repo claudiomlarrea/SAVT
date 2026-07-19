@@ -74,13 +74,13 @@ CHECKLIST_ALIGNED_ROLES: dict[str, str] = {
 }
 
 
-def _count_citations(text: str) -> int:
-    from savt.citations import count_numeric_citation_appearances
+def _count_citations(text: str, style: str = "numbered") -> int:
+    from savt.citations import count_citation_appearances
 
-    return count_numeric_citation_appearances(text)
+    return count_citation_appearances(text, style=style)
 
 
-def _section_metrics(text: str) -> dict:
+def _section_metrics(text: str, style: str = "numbered") -> dict:
     words = count_words(text)
     if words <= 0:
         return {
@@ -93,8 +93,8 @@ def _section_metrics(text: str) -> dict:
     lower = text.lower()
     critical = sum(1 for marker in CRITICAL_MARKERS if marker in lower)
     result_markers = sum(1 for marker in RESULTS_MARKERS if marker in lower)
-    cites = _count_citations(text)
-    density = round(cites / (words / 100), 2)
+    cites = _count_citations(text, style=style)
+    density = round(cites / (words / 100), 2) if words else 0.0
     return {
         "words": words,
         "citation_count": cites,
@@ -199,12 +199,13 @@ def _assess_section_depth(role: str, metrics: dict) -> str:
 
 def build_section_depth_analysis(parsed: dict) -> list[dict]:
     role_texts, section_meta = get_section_word_partition(parsed)
+    style = (parsed.get("citation_style") or "numbered").lower()
 
     rows: list[dict] = []
 
     for role, label in CANONICAL_SECTION_ORDER:
         text = role_texts.get(role, "")
-        metrics = _section_metrics(text)
+        metrics = _section_metrics(text, style=style)
         depth_status = _assess_section_depth(role, metrics)
         detected = section_meta.get(role, {}).get("detected_titles") or []
         if metrics["words"] <= 0 and depth_status == "missing":
