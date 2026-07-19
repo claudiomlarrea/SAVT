@@ -277,16 +277,10 @@ def render_evaluation_checklist(dashboard: dict) -> None:
 def render_canonical_apartados(dashboard: dict) -> None:
     """3) Tabla canónica + detalle solo de lo que hay que corregir."""
     reviews = dashboard.get("chapter_reviews") or []
-    words_map = _words_by_canonical_role(dashboard)
-    body_total = max(
-        sum(words_map.values())
-        or int((dashboard.get("document_model") or {}).get("document", {}).get("word_count") or 0),
-        1,
-    )
 
     st.markdown("## 3. Apartados de evaluación")
     st.caption(
-        "Los mismos apartados del checklist, con palabras y un resumen corto. "
+        "Los mismos apartados del checklist, con estado y un resumen corto. "
         "El detalle de corrección aparece solo donde hace falta revisar."
     )
 
@@ -297,16 +291,11 @@ def render_canonical_apartados(dashboard: dict) -> None:
     rows = []
     pending = []
     for review in reviews:
-        key = review.get("key") or ""
-        words = int(words_map.get(key) or 0)
-        pct = round(words * 100 / body_total, 1) if words else 0.0
         rows.append(
             {
-                "Apartado": review.get("title") or key,
+                "Apartado": review.get("title") or review.get("key") or "—",
                 "Estado": _review_status_label(review),
-                "Palabras": words if words else "—",
-                "% aprox.": f"{pct:.1f}%" if words else "—",
-                "Resumen": (review.get("summary") or "")[:180],
+                "Resumen": (review.get("summary") or "")[:220],
             }
         )
         if not review.get("ok"):
