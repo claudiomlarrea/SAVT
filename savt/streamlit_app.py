@@ -46,8 +46,8 @@ def render_header() -> None:
                 <h1>SAVT</h1>
                 <p class="savt-subtitle">{__app_name__} · v{__version__}</p>
                 <p class="savt-desc">
-                    Pre-auditoría académica integral de tesis y trabajos finales: estructura, coherencia,
-                    normativa institucional, integridad, ética y profundidad.
+                    Pre-auditoría académica por apartados: pegue introducción, marco, metodología,
+                    resultados, discusión, conclusiones y bibliografía.
                     Genera observaciones y recomendaciones antes de la evaluación del jurado.
                 </p>
                 <p class="savt-institution">Universidad Católica de Cuyo · Observatorio de Inteligencia Artificial</p>
@@ -83,7 +83,7 @@ def render_paste_sections_form() -> list[dict] | None:
 
     st.markdown("### Carga por apartados")
     st.caption(
-        "Pegue el texto de cada sección desde su tesis. No hace falta subir PDF ni Word. "
+        "Pegue el texto de cada sección desde su tesis. "
         "Deje vacío lo que no aplique. Puede agregar apartados extras al final."
     )
 
@@ -399,178 +399,6 @@ def render_sidebar(report=None) -> "AuditConfig":
         check_originality=check_originality,
         check_formal=check_formal,
         check_content_depth=check_content,
-    )
-
-
-def _run_upload_mode(config) -> None:
-    uploaded = st.file_uploader(
-        "Subir tesis (.docx o .pdf)",
-        type=["docx", "pdf"],
-        help="Word (.docx) o PDF exportado desde Word.",
-    )
-
-    if not uploaded:
-        for key in ("parsed_doc", "detected_sections", "structure_ready", "report", "manual_outline_text"):
-            st.session_state.pop(key, None)
-        st.info(
-            "Suba un archivo .docx o .pdf para iniciar la pre-auditoría académica. "
-            "Luego **confirmará el índice** (marcar cada apartado) antes de auditar. "
-            "Seleccione el perfil institucional en la barra lateral."
-        )
-        st.divider()
-        render_user_feedback()
-        return
-
-    # Nuevo archivo: limpiar estado de estructura/informe previos.
-    if st.session_state.get("uploaded_name") != uploaded.name:
-        st.session_state["uploaded_name"] = uploaded.name
-        for key in (
-            "parsed_doc",
-            "detected_sections",
-            "structure_ready",
-            "report",
-            "manual_outline_text",
-            "index_reviewed_checkbox",
-            "index_confirmation_editor",
-        ):
-            st.session_state.pop(key, None)
-
-    parsed = st.session_state.get("parsed_doc")
-    detected = st.session_state.get("detected_sections")
-    has_report = bool(st.session_state.get("report"))
-
-    # Si hay informe, no exigir de nuevo la detección (evita volver al paso 1 tras auditar).
-    if (parsed is None or detected is None) and not has_report:
-        if st.button("1. Detectar estructura", type="primary"):
-            with st.spinner("Extrayendo texto y localizando apartados…"):
-                from savt.audit import prepare_document
-
-                parsed, resolved_config, detected = prepare_document(
-                    io.BytesIO(uploaded.getvalue()),
-                    filename=uploaded.name,
-                    config=config,
-                )
-            st.session_state["parsed_doc"] = parsed
-            st.session_state["detected_sections"] = detected
-            st.session_state["resolved_config"] = resolved_config
-            st.session_state.pop("report", None)
-            st.rerun()
-        st.info(
-            "Paso 1: detectar una propuesta de estructura. "
-            "Paso 2: **abrir el índice del PDF y marcar cada apartado** antes de auditar."
-        )
-        st.divider()
-        render_user_feedback(context={"filename": uploaded.name})
-        return
-
-    structure_choice = None
-    if not st.session_state.get("report"):
-        structure_choice = render_structure_confirmation(
-            detected or [],
-            structure_source=str((parsed or {}).get("structure_source") or ""),
-        )
-        if structure_choice is None:
-            st.divider()
-            render_user_feedback(context={"filename": uploaded.name})
-            return
-
-        from savt.document_model import build_document_model
-        from savt.section_audit import detect_document_sections
-        from savt.structure_confirm import apply_manual_outline, apply_section_overrides
-
-        if structure_choice.get("mode") == "manual":
-            parsed = apply_manual_outline(parsed, structure_choice.get("entries") or [])
-            missing = parsed.get("manual_missing_titles") or []
-            if missing:
-                st.warning(
-                    "No se localizaron en el PDF estos títulos (revise ortografía o acorte el texto): "
-                    + "; ".join(missing[:8])
-                    + ("…" if len(missing) > 8 else "")
-                )
-            found = len(parsed.get("index_sections") or [])
-            if found < 2:
-                st.error(
-                    "Con el índice confirmado solo se localizaron menos de 2 apartados en el texto. "
-                    "Revise los títulos marcados (use el texto del índice, p. ej. «2. REVISIÓN DE LITERATURA») "
-                    "y reintente."
-                )
-                st.session_state.pop("index_reviewed_checkbox", None)
-                st.divider()
-                render_user_feedback(context={"filename": uploaded.name})
-                return
-            parsed["document_model"] = build_document_model(parsed)
-            st.session_state["detected_sections"] = detect_document_sections(parsed)
-        else:
-            parsed = apply_section_overrides(parsed, structure_choice.get("overrides") or [])
-            parsed["document_model"] = build_document_model(parsed)
-            st.session_state["detected_sections"] = detect_document_sections(parsed)
-        st.session_state["parsed_doc"] = parsed
-
-        progress_bar = st.progress(0.0)
-        status_box = st.empty()
-
-        def on_progress(phase: str, detail: str, fraction: float, payload: dict | None = None) -> None:
-            progress_bar.progress(min(max(fraction, 0.0), 1.0))
-            status_box.markdown(f"**{phase}** — {detail}")
-
-        try:
-            with st.spinner("Auditando tesis con la estructura confirmada…"):
-                from savt.audit import run_audit_from_parsed
-
-                resolved = st.session_state.get("resolved_config") or config
-                report = run_audit_from_parsed(
-                    parsed,
-                    filename=uploaded.name,
-                    config=resolved,
-                    on_progress=on_progress,
-                )
-        except Exception as exc:
-            st.error("La auditoría falló tras confirmar la estructura. Puede reintentar sin perder el PDF.")
-            st.exception(exc)
-            st.divider()
-            render_user_feedback(context={"filename": uploaded.name})
-            return
-
-        progress_bar.progress(1.0)
-        status_box.success("Auditoría completada.")
-        try:
-            from savt.usage_counter import record_audit_usage
-
-            usage_count = record_audit_usage()
-            if usage_count is not None:
-                st.session_state["usage_count"] = usage_count
-        except Exception:
-            pass
-        st.session_state["report"] = report
-        st.session_state["profile_id"] = resolved.profile_id
-        st.rerun()
-
-    report = st.session_state.get("report")
-    if not report or report.filename != uploaded.name:
-        st.divider()
-        render_user_feedback(context={"filename": uploaded.name})
-        return
-
-    dashboard = report.metadata.get("dashboard", {})
-    if not dashboard:
-        st.error("Informe incompleto. Vuelva a ejecutar la auditoría.")
-        st.divider()
-        render_user_feedback(context={"filename": uploaded.name})
-        return
-
-    if st.button("↩ Revisar estructura y reauditar"):
-        st.session_state.pop("report", None)
-        st.rerun()
-
-    base_name = uploaded.name.rsplit(".", 1)[0]
-    render_executive_report(dashboard, report, base_name)
-    st.divider()
-    render_user_feedback(
-        context={
-            "filename": uploaded.name,
-            "icai": dashboard.get("icai"),
-            "profile": dashboard.get("profile_label", ""),
-        }
     )
 
 
@@ -1874,29 +1702,5 @@ def _run_app() -> None:
     report = st.session_state.get("report")
     config = render_sidebar(report)
 
-    mode_labels = {
-        "paste": "Por apartados (pegar texto)",
-        "upload": "Archivo PDF / Word",
-    }
-    previous_mode = st.session_state.get("input_mode", "paste")
-    mode = st.radio(
-        "Cómo cargar la tesis",
-        options=["paste", "upload"],
-        format_func=lambda key: mode_labels[key],
-        horizontal=True,
-        key="input_mode_radio",
-        help=(
-            "Por apartados: pegue Introducción, metodología, bibliografía, etc. "
-            "Archivo: suba PDF/DOCX y confirme el índice (flujo clásico)."
-        ),
-    )
-    if mode != previous_mode:
-        st.session_state["input_mode"] = mode
-        _clear_audit_session_keys()
-        st.rerun()
-    st.session_state["input_mode"] = mode
-
-    if mode == "paste":
-        _run_paste_mode(config)
-    else:
-        _run_upload_mode(config)
+    st.session_state["input_mode"] = "paste"
+    _run_paste_mode(config)
