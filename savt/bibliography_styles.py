@@ -332,12 +332,13 @@ def detect_citation_style(body: str, bib_text: str) -> str:
     if apa_hints < 5:
         apa_hints = len(APA_ENTRY_START.findall(normalized)) + len(APA_ENTRY_FALLBACK.findall(normalized))
     # Solo números bajos al inicio de línea (1.–200.); evita páginas/volúmenes en APA.
+    # Tolera «1.Autor» (sin espacio), habitual en Word/PubMed.
     numbered_hints = len(
-        re.findall(r"(?m)^\s*(?:\[?[1-9]\d{0,2}\]?\.)\s+[A-Za-zÁÉÍÓÚ\"'(]", normalized)
+        re.findall(r"(?m)^\s*(?:\[?[1-9]\d{0,2}\]?\.)\s*[A-Za-zÁÉÍÓÚ\"'(]", normalized)
     )
     vancouver_hints = len(
         re.findall(
-            r"(?m)^\s*\d{1,3}\.\s+[A-ZÁÉÍÓÚÑ][^\n]{10,}(?:\[Internet\]|Available from:|\[Cited)",
+            r"(?m)^\s*\d{1,3}\.\s*[A-ZÁÉÍÓÚÑ][^\n]{10,}(?:\[Internet\]|Available from:|PMID|doi|\[\d{4}|\(\d{4}|\b20\d{2}\b)",
             normalized,
         )
     )
@@ -363,18 +364,34 @@ def detect_citation_style_with_body(body: str, bib_text: str) -> str:
         count_apa_citation_appearances,
         count_numeric_citation_appearances,
         extract_apa_citations,
+        extract_cited_numbers,
     )
 
     apa_n = count_apa_citation_appearances(body)
     num_n = count_numeric_citation_appearances(body, max_ref=500)
     apa_keys, _ = extract_apa_citations(body)
+    cited_nums = extract_cited_numbers(body, max_ref=500)
+
+    # Bibliografía claramente Vancouver numerada (1. Autor… / 1.Autor…).
+    bib_norm = normalize_bibliography_text(bib_text or "")
+    numbered_bib = len(parse_bibliography(bib_norm))
+    numbered_line_hits = len(
+        re.findall(r"(?m)^\s*\d{1,3}\.\s*[A-Za-zÁÉÍÓÚÑ\"'(]", bib_norm)
+    )
+
     # Cuerpo claramente APA aunque la bibliografía use [45]… (Vancouver + autor-año).
     if len(apa_keys) >= 15 or apa_n >= 50:
         if apa_n >= num_n * 0.45 or len(apa_keys) >= 20:
-            return "apa"
+            # No forzar APA si el cuerpo es casi solo (1)(2)(3) y la bib es numerada.
+            if not (len(cited_nums) >= 20 and num_n >= apa_n * 2 and numbered_bib >= 10):
+                return "apa"
     if apa_n >= 12 and apa_n >= max(num_n, 1) * 2:
         return "apa"
     if num_n >= 12 and num_n > apa_n * 2:
+        return "numbered"
+    if len(cited_nums) >= 15 and numbered_bib >= 10 and apa_n < 8:
+        return "numbered"
+    if numbered_line_hits >= 15 and numbered_bib >= 10 and len(apa_keys) < 8:
         return "numbered"
     return style
 

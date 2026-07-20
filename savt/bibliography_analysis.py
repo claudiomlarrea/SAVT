@@ -389,8 +389,29 @@ def build_bibliography_details(
             if ref.key and apa_keys_match(ref.key, cited_keys)
         )
     else:
-        cited_in_text = len(parsed.get("cited_numbers") or set())
-        text_unique = cited_in_text
+        cited_nums = {int(n) for n in (parsed.get("cited_numbers") or set())}
+        bib_nums = set(bibliography.keys())
+        matched = cited_nums & bib_nums if bib_nums else cited_nums
+        cited_in_text = len(matched)
+        text_unique = len(cited_nums)
+        unmatched_nums = sorted(cited_nums - bib_nums) if bib_nums else []
+        unmatched_count = len(unmatched_nums)
+        if unmatched_nums:
+            findings.append(
+                Finding(
+                    module="Bibliografía",
+                    severity="warning" if len(unmatched_nums) >= 5 else "info",
+                    area="Bibliografía",
+                    title="Citas numeradas sin entrada en bibliografía",
+                    detail=(
+                        f"{len(unmatched_nums)} número(s) citados en el texto no tienen "
+                        f"entrada correspondiente en la bibliografía."
+                    ),
+                    evidence=", ".join(f"({n})" for n in unmatched_nums[:25]),
+                    why="En Vancouver/IEEE cada (n) del cuerpo debe existir como entrada n.",
+                    how_to_fix="Agregue la referencia faltante o corrija el número de la cita en el texto.",
+                )
+            )
 
     coverage = "adecuada"
     if len(bibliography) == 0:

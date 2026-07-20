@@ -129,22 +129,27 @@ def _is_decimal_notation(chunk: str) -> bool:
 def _is_false_positive_numeric_citation(chunk: str, body: str, start: int) -> bool:
     if _is_decimal_notation(chunk):
         return True
+    # Rangos de años o años sueltos: (2020–2023), (2019)
+    if re.search(r"(?:19|20)\d{2}\s*[-–]\s*(?:19|20)\d{2}", chunk):
+        return True
     parts = [part for part in re.split(r"[,\s\-–]+", chunk) if part.isdigit()]
     if not parts:
         return True
     numbers = [int(part) for part in parts]
     if 0 in numbers:
         return True
+    if numbers and all(1900 <= n <= 2039 for n in numbers):
+        return True
     # Enumeraciones del cuerpo: «(1) hidroxilasa» / «(2) alcohol…» (no son citas).
-    after = body[start + len(chunk) + 1 : start + len(chunk) + 24]
-    if re.match(r"^\)\s*[A-Za-zÁÉÍÓÚáéíóúñ]", body[start : start + len(chunk) + 24]):
-        # El patrón ya capturó solo el interior; mirar justo después del cierre.
-        close = body.find(")", start)
-        if close != -1:
-            tail = body[close + 1 : close + 30].lstrip()
-            if re.match(r"^[A-Za-zÁÉÍÓÚáéíóúñ]", tail) and not re.match(r"^\d{4}", tail):
-                if len(numbers) == 1 and numbers[0] <= 30:
-                    return True
+    close = body.find(")", start)
+    if close != -1:
+        tail = body[close + 1 : close + 30].lstrip()
+        # Tras la cita Vancouver suele haber punto: «(1). Siguiente…»
+        if tail.startswith("."):
+            tail = tail[1:].lstrip()
+        elif re.match(r"^[A-Za-zÁÉÍÓÚáéíóúñ]", tail) and not re.match(r"^\d{4}", tail):
+            if len(numbers) == 1 and numbers[0] <= 30:
+                return True
     if len(numbers) == 1 and 1 <= numbers[0] <= 200:
         return False
     before = body[max(0, start - 80) : start]
@@ -152,6 +157,35 @@ def _is_false_positive_numeric_citation(chunk: str, body: str, start: int) -> bo
         if len(numbers) == 1 and numbers[0] > 100:
             return True
     return False
+
+
+def _expand_numeric_citation_chunk(chunk: str, *, max_ref: int) -> list[int]:
+    """Expande «1, 2, 5-7» → [1,2,5,6,7], omitiendo años."""
+    nums: list[int] = []
+    for token in re.split(r",\s*", chunk.strip()):
+        token = token.strip()
+        if not token:
+            continue
+        if re.fullmatch(r"\d+", token):
+            n = int(token)
+            if 1900 <= n <= 2039:
+                continue
+            if 1 <= n <= max_ref:
+                nums.append(n)
+            continue
+        range_match = re.fullmatch(r"(\d+)\s*[-–]\s*(\d+)", token)
+        if not range_match:
+            continue
+        start_n = int(range_match.group(1))
+        end_n = int(range_match.group(2))
+        if 1900 <= start_n <= 2039 or 1900 <= end_n <= 2039:
+            continue
+        if end_n < start_n or (end_n - start_n) > 40:
+            continue
+        for n in range(start_n, end_n + 1):
+            if 1 <= n <= max_ref:
+                nums.append(n)
+    return nums
 
 
 def _add_numeric_chunk(
@@ -164,14 +198,8 @@ def _add_numeric_chunk(
 ) -> None:
     if _is_false_positive_numeric_citation(chunk, body, start):
         return
-    for part in re.split(r"[,\s\-–]+", chunk):
-        if not part.isdigit():
-            continue
-        num = int(part)
-        if 1900 <= num <= 2039:
-            continue
-        if 1 <= num <= max_ref:
-            cited.add(num)
+    for num in _expand_numeric_citation_chunk(chunk, max_ref=max_ref):
+        cited.add(num)
 
 
 def plausible_apa_year(year: str) -> bool:
@@ -396,12 +424,15 @@ def merged_bibliography_search_text(parsed: dict) -> str:
 
 
 def count_numeric_citation_appearances(body: str, max_ref: int = 500) -> int:
-    """Cuenta apariciones de citas numeradas (Vancouver/IEEE). No usar en tesis APA."""
+    """Cuenta apariciones de referencias numeradas (cada n° en (1,2) suma)."""
     appearances = 0
     for pattern in (NUMERIC_CITATION_PATTERN, BRACKET_NUMERIC_CITATION):
         for match in pattern.finditer(body):
-            if not _is_false_positive_numeric_citation(match.group(1), body, match.start()):
-                appearances += 1
+            chunk = match.group(1)
+            if _is_false_positive_numeric_citation(chunk, body, match.start()):
+                continue
+            expanded = _expand_numeric_citation_chunk(chunk, max_ref=max_ref)
+            appearances += len(expanded) if expanded else 0
     return appearances
 
 

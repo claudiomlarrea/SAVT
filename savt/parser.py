@@ -17,7 +17,7 @@ CHAPTER_PATTERN = re.compile(
 SECTION_PATTERN = re.compile(r"^(\d+(?:\.\d+)+)\s+(.+)$")
 NUMERIC_CITATION_PATTERN = re.compile(r"\((\d+(?:\s*[,\s\-–]\s*\d+)*)\)")
 NUMBERED_BIB_ENTRY_START = re.compile(
-    r"(?m)^(\d+)\.\s+([A-Za-zÁÉÍÓÚáéíóúñ\"(].*)"
+    r"(?m)^(\d+)\.\s*([A-Za-zÁÉÍÓÚáéíóúñ\"(].*)"
 )
 STATISTICAL_CONTEXT = re.compile(
     r"(?i)(?:\bp\s*[<>=]|\bvalor\s+p\b|\bic\s*\(|\bnivel\s+de\s+significancia|\balpha\b|\bα\b|"
@@ -53,10 +53,10 @@ APA_BIB_ENTRY_HINT = re.compile(
     rf"[A-ZÁÉÍÓÚÑ][^\n]{{8,220}}?(?:\s|,)\s*\(\d{{4}}[a-z]?\)"
 )
 NUMBERED_BIB_ENTRY_HINT = re.compile(
-    r"(?m)^\s*(?:\[\d{1,3}\]|\d{1,3}\.)\s+[A-Za-zÁÉÍÓÚáéíóúñ\"'(]"
+    r"(?m)^\s*(?:\[\d{1,3}\]\s*|\d{1,3}\.\s*)[A-Za-zÁÉÍÓÚáéíóúñ\"'(]"
 )
 VANCOUVER_BIB_ENTRY_HINT = re.compile(
-    r"(?m)^\s*\d{1,3}\.\s+[A-ZÁÉÍÓÚÑ][^\n]{10,}(?:\[Internet\]|Available from:|\[\d{4}|\(\d{4})"
+    r"(?m)^\s*\d{1,3}\.\s*[A-ZÁÉÍÓÚÑ][^\n]{10,}(?:\[Internet\]|Available from:|PMID|doi|\[\d{4}|\(\d{4}|\b19\d{2}\b|\b20\d{2}\b)"
 )
 _BIB_END_MARKERS = re.compile(
     r"(?im)(?:^|\n)\s*(?:\d+(?:\.\d+)*\.?\s*)?"
@@ -458,9 +458,10 @@ def _looks_like_bibliography_entry(raw: str) -> bool:
 
 
 _NUMBERED_REFERENCE_START_PATTERNS: tuple[re.Pattern[str], ...] = (
-    re.compile(r"(?m)^(\d{1,3})\.\s+(?=[A-Za-zÁÉÍÓÚáéíóúñ\"'(])"),
-    re.compile(r"(?m)^\[(\d{1,3})\]\s+(?=[A-Za-zÁÉÍÓÚáéíóúñ\"'(])"),
-    re.compile(r"(?m)^(\d{1,3})\)\s+(?=[A-Za-zÁÉÍÓÚáéíóúñ\"'(])"),
+    # Vancouver suele ir «1. Autor» o «1.Autor» (sin espacio tras el punto).
+    re.compile(r"(?m)^(\d{1,3})\.\s*(?=[A-Za-zÁÉÍÓÚáéíóúñ\"'(])"),
+    re.compile(r"(?m)^\[(\d{1,3})\]\s*(?=[A-Za-zÁÉÍÓÚáéíóúñ\"'(])"),
+    re.compile(r"(?m)^(\d{1,3})\)\s*(?=[A-Za-zÁÉÍÓÚáéíóúñ\"'(])"),
 )
 _NUMBERED_REFERENCE_NUMBER_ONLY = re.compile(r"(?m)^(\d{1,3})\.\s*$")
 

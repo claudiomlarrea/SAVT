@@ -364,11 +364,15 @@ def build_citation_reconciliation(
         uncited = len(bib_keys - matched_bib)
         text_unique_raw = len(text_keys)
     else:
-        union_unique = len(union_numbered)
-        document_unique = len(report.cited_numbers)
+        cited_nums = set(report.cited_numbers or [])
+        if not cited_nums and union_numbered:
+            cited_nums = set(union_numbered)
         bib_keys_n = set(report.bibliography.keys())
-        uncited = len(bib_keys_n - report.cited_numbers)
-        text_unique_raw = document_unique
+        matched = cited_nums & bib_keys_n if bib_keys_n else cited_nums
+        document_unique = len(matched)
+        union_unique = len(matched)
+        uncited = len(bib_keys_n - cited_nums) if bib_keys_n else 0
+        text_unique_raw = len(cited_nums)
 
     total_refs = bib_dashboard.get("total_refs", len(report.bibliography))
     unmatched = bib_dashboard.get("unmatched_citations", 0)
