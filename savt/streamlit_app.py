@@ -680,12 +680,6 @@ def render_structure_confirmation(sections: list[dict], structure_source: str = 
             "del índice (marque «Presente» y escriba el título)."
         )
 
-    reviewed = st.checkbox(
-        "He abierto el índice del documento y estoy contrastando cada apartado",
-        key="index_reviewed_checkbox",
-        value=bool(st.session_state.get("index_reviewed_checkbox")),
-    )
-
     base_rows = build_index_confirmation_rows(sections or [])
     st.session_state["_index_confirm_meta"] = [
         {"_role_original": r.get("_role_original", "otros")} for r in base_rows
@@ -743,17 +737,25 @@ def render_structure_confirmation(sections: list[dict], structure_source: str = 
         present_count = sum(1 for row in edited.to_dict("records") if row.get("Presente en el índice"))
     st.caption(f"Apartados marcados como presentes: **{present_count}** (mínimo 2 para auditar).")
 
+    # Casilla junto al botón (no arriba, fuera de vista) y sin disabled=… (evita el cursor 🚫).
+    reviewed = st.checkbox(
+        "Confirmo que contrasté esta lista con el índice del documento",
+        key="index_reviewed_checkbox",
+    )
+
     confirm = st.button(
         "Confirmar índice y auditar",
         type="primary",
         key="btn_index_confirm_audit",
-        disabled=not reviewed,
     )
-    if not reviewed:
-        st.caption("Active la casilla de contraste con el índice para habilitar la auditoría.")
-        return None
 
     if confirm:
+        if not reviewed:
+            st.error(
+                "Marque la casilla **«Confirmo que contrasté esta lista con el índice»** "
+                "(justo arriba del botón) y vuelva a pulsar."
+            )
+            return None
         records = edited.to_dict("records") if edited is not None else []
         choice = confirmation_from_index_editor(records)
         if choice is None:
