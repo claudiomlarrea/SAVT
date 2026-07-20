@@ -194,8 +194,58 @@ def _clean_cell(value) -> str:
     return text
 
 
+def _jury_apartado_rows(dashboard: dict) -> tuple[list[dict], int, int]:
+    """
+    Apartados académicos para jurados: extensión y % sobre el cuerpo (bibliografía aparte).
+    """
+    from savt.chapter_reviews import SECTION_TITLES
+
+    content = dashboard.get("content_dashboard") or {}
+    total_body = int(content.get("total_body_words") or 0)
+    bib_words = int(content.get("bibliography_words") or 0)
+    if not bib_words:
+        bib_words = int((dashboard.get("canonical_words") or {}).get("bibliografia") or 0)
+
+    by_role = {s.get("role"): s for s in (content.get("sections") or []) if s.get("role")}
+    canonical_words = dashboard.get("canonical_words") or {}
+
+    jury_roles = (
+        "introduccion",
+        "objetivos",
+        "marco_teorico",
+        "metodologia",
+        "resultados",
+        "discusion",
+        "conclusiones",
+    )
+    rows: list[dict] = []
+    denom = max(total_body, 1)
+    for role in jury_roles:
+        label = SECTION_TITLES.get(role, role.replace("_", " ").title())
+        sec = by_role.get(role) or {}
+        words = int(sec.get("words") or canonical_words.get(role) or 0)
+        pct = sec.get("percent_label")
+        if not pct and words:
+            pct = f"{round(words * 100 / denom, 1):.1f}%"
+        elif not words:
+            pct = "—"
+        rows.append({"Apartado": label, "Palabras": words, "% del cuerpo": pct})
+
+    if bib_words:
+        total_doc = max(total_body + bib_words, 1)
+        rows.append(
+            {
+                "Apartado": SECTION_TITLES["bibliografia"],
+                "Palabras": bib_words,
+                "% del cuerpo": f"{round(bib_words * 100 / total_doc, 1):.1f}%",
+            }
+        )
+
+    return rows, total_body, bib_words
+
+
 def render_structure_and_checklist(dashboard: dict) -> None:
-    """1) Capítulos del documento + checklist académico (fusionados)."""
+    """1) Apartados académicos + checklist (vista para jurados)."""
     detected = dashboard.get("detected_sections") or []
     model = dashboard.get("document_model") or {}
     chapters = model.get("chapters") or []
@@ -204,22 +254,47 @@ def render_structure_and_checklist(dashboard: dict) -> None:
     reviews = {r.get("key"): r for r in (dashboard.get("chapter_reviews") or [])}
 
     st.markdown("## 1. Estructura del documento y checklist")
-    if thesis_type == "compendio":
+    st.caption(
+        "Extensión por **apartado académico** (lo que evalúan los jurados) "
+        "y estado del checklist."
+    )
+
+    apartado_rows, total_body, bib_words = _jury_apartado_rows(dashboard)
+    st.markdown("### Apartados detectados")
+    if apartado_rows:
+        for idx, row in enumerate(apartado_rows):
+            c1, c2, c3 = st.columns([2.2, 1, 1])
+            with c1:
+                st.markdown(f"**{row['Apartado']}**")
+            with c2:
+                st.markdown(f"{int(row['Palabras']):,} palabras")
+            with c3:
+                st.markdown(str(row["% del cuerpo"]))
+            if idx < len(apartado_rows) - 1:
+                st.markdown(
+                    "<hr style='margin:0.35rem 0;border:none;border-top:1px solid #eee'/>",
+                    unsafe_allow_html=True,
+                )
+        classified = sum(int(r["Palabras"]) for r in apartado_rows if r["Apartado"] != "Bibliografía")
         st.caption(
-            "Primero: los **capítulos reales** del PDF (palabras y %). "
-            "Después: el **checklist académico** (qué está completo y qué revisar)."
+            f"**Cuerpo:** {total_body:,} palabras · "
+            f"**Clasificado en apartados:** {classified:,} · "
+            f"**Bibliografía:** {bib_words:,} palabras."
+        )
+        st.caption(
+            "Los porcentajes del cuerpo se calculan sobre el total de palabras del texto principal "
+            "(sin bibliografía). El % de bibliografía es sobre cuerpo + bibliografía."
         )
     else:
-        st.caption("Bloques detectados del documento y estado del checklist académico.")
+        st.warning("No se pudieron estimar apartados académicos.")
 
-    st.markdown("### Capítulos detectados")
-    rows = []
+    chapter_rows = []
     if chapters:
         total = max(sum(int(c.get("words") or 0) for c in chapters), 1)
         for idx, chapter in enumerate(chapters, start=1):
             words = int(chapter.get("words") or 0)
             pct = round(words * 100 / total, 1)
-            rows.append(
+            chapter_rows.append(
                 {
                     "N°": idx,
                     "Capítulo": chapter.get("title") or "—",
@@ -227,9 +302,9 @@ def render_structure_and_checklist(dashboard: dict) -> None:
                     "%": f"{pct:.1f}%",
                 }
             )
-    else:
+    elif detected and thesis_type != "compendio":
         for idx, item in enumerate(detected, start=1):
-            rows.append(
+            chapter_rows.append(
                 {
                     "N°": item.get("order", idx),
                     "Capítulo": item.get("path") or item.get("detected_as") or item.get("title") or "—",
@@ -238,19 +313,28 @@ def render_structure_and_checklist(dashboard: dict) -> None:
                 }
             )
 
-    if rows:
-        st.dataframe(rows, hide_index=True, use_container_width=True)
-        st.caption(f"**{len(rows)}** bloques · **{sum(int(r['Palabras']) for r in rows):,}** palabras.")
-    else:
-        st.warning("No se identificaron capítulos o apartados estructurales.")
-
     tree = dashboard.get("structure_tree") or []
-    if tree:
-        with st.expander("Subtítulos dentro de cada capítulo", expanded=False):
-            for node in tree:
-                st.markdown(f"**{node.get('title')}** — {int(node.get('words') or 0):,} palabras")
-                for child in node.get("children") or []:
-                    st.markdown(f"- {child.get('title')} ({int(child.get('words') or 0):,} palabras)")
+    if chapter_rows or tree:
+        with st.expander("Capítulos del PDF (detalle estructural)", expanded=False):
+            if chapter_rows:
+                for row in chapter_rows:
+                    title = str(row["Capítulo"])
+                    st.markdown(
+                        f"**{row['N°']}.** {title} — "
+                        f"{int(row['Palabras']):,} palabras ({row['%']})"
+                    )
+                st.caption(
+                    f"**{len(chapter_rows)}** capítulos · "
+                    f"**{sum(int(r['Palabras']) for r in chapter_rows):,}** palabras."
+                )
+            if tree:
+                st.markdown("**Subtítulos por capítulo**")
+                for node in tree:
+                    st.markdown(f"**{node.get('title')}** — {int(node.get('words') or 0):,} palabras")
+                    for child in node.get("children") or []:
+                        st.markdown(
+                            f"- {child.get('title')} ({int(child.get('words') or 0):,} palabras)"
+                        )
 
     st.markdown("### Checklist académico")
     st.markdown(f"**Estado general:** {checklist.get('status', '—')}")
