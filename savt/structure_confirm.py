@@ -25,6 +25,48 @@ CONFIDENCE_LABELS = {
 }
 
 
+def suggest_role_from_title(title: str) -> str | None:
+    """Infiere rol académico desde el título del índice."""
+    from savt.bibliography_styles import strip_accents
+    from savt.section_resolver import classify_heading
+
+    title = (title or "").strip()
+    if not title:
+        return None
+    role = classify_heading(title)
+    if role and role not in {"omitir"}:
+        return role
+    folded = strip_accents(title.lower())
+    rules: list[tuple[str, str]] = [
+        (
+            r"marco\s+teor|marco\s+concept|revision\s+de\s+literat|revision\s+bibliograf|"
+            r"estado\s+del\s+arte|antecedent|fundamentacion|encuadre\s+teor|bases\s+teor|"
+            r"referencial\s+teor|marco\s+referenc",
+            "marco_teorico",
+        ),
+        (r"objetivo|hipotesis|justificacion|pregunta\s+de\s+investig", "objetivos"),
+        (r"introducci|planteamiento", "introduccion"),
+        (r"materiales?\s+y\s+metodos|metodolog|metodos?\b|procedimiento", "metodologia"),
+        (r"resultado", "resultados"),
+        (r"discusi|interpretacion\s+de\s+(?:los\s+)?resultados", "discusion"),
+        (r"conclusi|perspectivas?|recomendacion|aportes?\s+final", "conclusiones"),
+        (r"referencias|bibliograf", "bibliografia"),
+        (r"resumen|abstract|presentacion", "presentacion"),
+    ]
+    for pattern, mapped in rules:
+        if re.search(pattern, folded):
+            return mapped
+    return None
+
+
+def resolve_confirmation_role(title: str, selected_label: str) -> str:
+    """Usa el rol elegido; si quedó en «Otro», infiere desde el título del índice."""
+    role = label_to_role(str(selected_label or ROLE_LABELS["otros"]))
+    if role not in {"otros", "omitir", ""}:
+        return role
+    return suggest_role_from_title(title) or role
+
+
 def confidence_for_section(
     *,
     role: str,
@@ -156,6 +198,11 @@ def build_index_confirmation_rows(sections: list[dict]) -> list[dict]:
         title = str(item.get("detected_as") or item.get("title") or item.get("path") or "").strip()
         if not title or title == "—":
             title = ROLE_LABELS.get(role, role)
+        # Si la detección dejó «otros», sugerir rol por el título del índice.
+        if role in {"otros", "omitir", ""}:
+            suggested = suggest_role_from_title(title)
+            if suggested:
+                role = suggested
         words = int(item.get("words") or 0)
         # No marcar por defecto filas con 0 palabras: el usuario debe tildarlas al verificar el índice.
         include = bool(item.get("include", True)) and words > 0
@@ -197,7 +244,10 @@ def confirmation_from_index_editor(rows: list[dict]) -> dict | None:
         if not row.get("Presente en el índice", False):
             continue
         title = str(row.get("Título en el índice") or "").strip()
-        role = label_to_role(str(row.get("Apartado académico") or ROLE_LABELS["otros"]))
+        role = resolve_confirmation_role(
+            title,
+            str(row.get("Apartado académico") or ROLE_LABELS["otros"]),
+        )
         if role == "omitir":
             continue
         if not title:
@@ -780,6 +830,42 @@ def locate_title_in_text(
     return pool[0].start()
 
 
+# Sinónimos de búsqueda cuando el usuario marca el rol canónico pero el PDF usa otro título.
+ROLE_SEARCH_ALIASES: dict[str, tuple[str, ...]] = {
+    "marco_teorico": (
+        "MARCO TEÓRICO",
+        "MARCO TEORICO",
+        "REVISIÓN DE LITERATURA",
+        "REVISION DE LITERATURA",
+        "ANTECEDENTES",
+        "ESTADO DEL ARTE",
+        "FUNDAMENTACIÓN TEÓRICA",
+        "MARCO CONCEPTUAL",
+        "MARCO REFERENCIAL",
+    ),
+    "objetivos": (
+        "OBJETIVOS",
+        "OBJETIVO GENERAL",
+        "OBJETIVOS ESPECÍFICOS",
+        "HIPÓTESIS",
+        "JUSTIFICACIÓN",
+    ),
+    "introduccion": ("INTRODUCCIÓN", "INTRODUCCION", "PLANTEAMIENTO"),
+    "metodologia": (
+        "METODOLOGÍA",
+        "METODOLOGIA",
+        "MATERIALES Y MÉTODOS",
+        "MATERIALES Y METODOS",
+        "MÉTODOS",
+        "METODOS",
+    ),
+    "resultados": ("RESULTADOS",),
+    "discusion": ("DISCUSIÓN", "DISCUSION", "DISCUSIONES"),
+    "conclusiones": ("CONCLUSIONES", "CONCLUSIÓN", "PERSPECTIVAS"),
+    "bibliografia": ("REFERENCIAS", "BIBLIOGRAFÍA", "BIBLIOGRAFIA"),
+}
+
+
 def apply_manual_outline(parsed: dict, entries: list[dict]) -> dict:
     """
     Localiza en el texto cada título ingresado por el usuario y arma section_map.
@@ -793,16 +879,40 @@ def apply_manual_outline(parsed: dict, entries: list[dict]) -> dict:
     if not active:
         return parsed
 
+    # Reclasificar «otros» por el título antes de localizar.
+    normalized_active: list[dict] = []
+    for entry in active:
+        item = dict(entry)
+        role = item.get("role") or "otros"
+        title = str(item.get("title") or "")
+        if role in {"otros", ""}:
+            suggested = suggest_role_from_title(title)
+            if suggested:
+                item["role"] = suggested
+        normalized_active.append(item)
+    active = normalized_active
+
     located: list[tuple[int, dict]] = []
     occupied: list[tuple[int, int]] = []
     cursor = 0
     for entry in active:
         title = str(entry.get("title") or "")
+        role = entry.get("role") or "otros"
         # Preferir orden del índice; si no aparece después del cursor, buscar en todo el doc
-        # (p. ej. bibliografías de capítulos previos).
         pos = locate_title_in_text(body, title, min_pos=cursor, occupied=occupied)
         if pos is None and cursor > 0:
             pos = locate_title_in_text(body, title, min_pos=0, occupied=occupied)
+        # Si el título canónico no está en el PDF, probar sinónimos del rol.
+        if pos is None and role in ROLE_SEARCH_ALIASES:
+            for alias in ROLE_SEARCH_ALIASES[role]:
+                if alias.lower() in title.lower():
+                    continue
+                pos = locate_title_in_text(body, alias, min_pos=cursor, occupied=occupied)
+                if pos is None and cursor > 0:
+                    pos = locate_title_in_text(body, alias, min_pos=0, occupied=occupied)
+                if pos is not None:
+                    entry = {**entry, "title": alias}
+                    break
         if pos is None:
             continue
         located.append((pos, entry))

@@ -280,6 +280,25 @@ def render_structure_and_checklist(dashboard: dict) -> None:
             f"**Clasificado en apartados:** {classified:,} · "
             f"**Bibliografía:** {bib_words:,} palabras."
         )
+        zero_important = [
+            r["Apartado"]
+            for r in apartado_rows
+            if int(r["Palabras"]) == 0
+            and any(
+                key in str(r["Apartado"]).lower()
+                for key in ("marco", "objetivo", "introduc", "conclus")
+            )
+        ]
+        if zero_important:
+            st.warning(
+                "**Apartados en 0 palabras:** "
+                + ", ".join(zero_important)
+                + ". Suele ocurrir si en la confirmación del índice quedaron como "
+                "**«Otro / sin clasificar»** o el título no coincide con el PDF. "
+                "Pulse **↩ Revisar estructura y reauditar**, asigne p. ej. "
+                "«Revisión de literatura / Antecedentes» → **Marco teórico** "
+                "y «Objetivos / Hipótesis / Justificación» → **Pregunta, objetivos e hipótesis**."
+            )
         st.caption(
             "Los porcentajes del cuerpo se calculan sobre el total de palabras del texto principal "
             "(sin bibliografía). El % de bibliografía es sobre cuerpo + bibliografía."
@@ -699,7 +718,8 @@ def render_structure_confirmation(sections: list[dict], structure_source: str = 
     st.markdown("### Apartados a confirmar")
     st.caption(
         "Marque **Presente en el índice**. Complete o corrija **Título en el índice** "
-        "(tal como aparece en su tesis). Elija el **Apartado académico**. "
+        "(tal como aparece en su tesis). Elija el **Apartado académico** "
+        "(no deje el marco o los objetivos en «Otro / sin clasificar»). "
         "Use **+** al final de la tabla para agregar un apartado distinto."
     )
     edited = st.data_editor(
