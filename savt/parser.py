@@ -53,7 +53,7 @@ APA_BIB_ENTRY_HINT = re.compile(
     rf"[A-ZÁÉÍÓÚÑ][^\n]{{8,220}}?(?:\s|,)\s*\(\d{{4}}[a-z]?\)"
 )
 NUMBERED_BIB_ENTRY_HINT = re.compile(
-    r"(?m)^\s*(?:\[?\d{1,3}\]?\.)\s+[A-Za-zÁÉÍÓÚáéíóúñ\"'(]"
+    r"(?m)^\s*(?:\[\d{1,3}\]|\d{1,3}\.)\s+[A-Za-zÁÉÍÓÚáéíóúñ\"'(]"
 )
 VANCOUVER_BIB_ENTRY_HINT = re.compile(
     r"(?m)^\s*\d{1,3}\.\s+[A-ZÁÉÍÓÚÑ][^\n]{10,}(?:\[Internet\]|Available from:|\[\d{4}|\(\d{4})"
@@ -118,7 +118,36 @@ def _score_bibliography_candidate(full_text: str, pos: int) -> int:
     numbered_entries = len(NUMBERED_BIB_ENTRY_HINT.findall(following))
     vancouver_entries = len(VANCOUVER_BIB_ENTRY_HINT.findall(following))
     score += min(apa_entries + numbered_entries + vancouver_entries, 35)
+
+    # Preferir el inicio real del listado ([1] / 1.) frente a encabezados
+    # repetidos de página a mitad de bibliografía ([45], [21], …).
+    first_num = _first_bibliography_entry_number(following)
+    if first_num is not None:
+        if first_num <= 3:
+            score += 45
+        elif first_num <= 8:
+            score += 20
+        elif first_num >= 15:
+            score -= 35
+
+    # Encabezado corrido: «Bibliografía» + título de tesis + [N] mid-list.
+    if re.match(
+        r"(?is)^\s*BIBLIOGRAF[IÍÁ][A-Z]*\s+(?:Tesis|Thesis|Dissertation)\b.{0,120}?\[\d{2,3}\]",
+        following,
+    ):
+        score -= 50
     return score
+
+
+def _first_bibliography_entry_number(text: str) -> int | None:
+    """Primer número de entrada bibliográfica visible tras un candidato de encabezado."""
+    match = re.search(
+        r"(?m)^\s*(?:\[(\d{1,3})\]|(\d{1,3})\.)\s+[A-Za-zÁÉÍÓÚáéíóúñ\"'(]",
+        text[:2500],
+    )
+    if not match:
+        return None
+    return int(match.group(1) or match.group(2))
 
 
 def _score_inferred_bibliography_region(full_text: str, start: int, end: int) -> int:
@@ -301,19 +330,49 @@ def extract_text_from_docx(source: BinaryIO | str) -> str:
     return "\n\n".join(paragraphs)
 
 
+def _pick_bibliography_start(full_text: str, positions: list[int]) -> int:
+    """
+    Elige el inicio del bloque bibliográfico final.
+
+    Evita encabezados repetidos de página («Bibliografía» a mitad del listado):
+    entre candidatos top, prioriza bloques que arrancan en entradas bajas ([1]/1.)
+    y, si hay varios, el más cercano al final del documento (bibliografía global).
+    """
+    scored = [(pos, _score_bibliography_candidate(full_text, pos)) for pos in positions]
+    best_score = max(score for _, score in scored)
+    top = [pos for pos, score in scored if score >= best_score - 2]
+    if len(top) == 1:
+        return top[0]
+
+    def _rank(pos: int) -> tuple[int, int, int]:
+        first = _first_bibliography_entry_number(full_text[pos : pos + 2500])
+        # Menor first_num es mejor; luego mayor pos (bloque final); desempate estable.
+        first_key = first if first is not None else 10_000
+        return (first_key, -pos, pos)
+
+    starting_low = [
+        pos
+        for pos in top
+        if (_first_bibliography_entry_number(full_text[pos : pos + 2500]) or 999) <= 5
+    ]
+    pool = starting_low or top
+    return min(pool, key=_rank)
+
+
 def split_body_and_bibliography(full_text: str) -> tuple[str, str]:
     positions = _bibliography_start_positions(full_text)
     if positions:
-        best_score = max(_score_bibliography_candidate(full_text, pos) for pos in positions)
-        top = [pos for pos in positions if _score_bibliography_candidate(full_text, pos) >= best_score - 2]
-        idx = max(top)
+        idx = _pick_bibliography_start(full_text, positions)
         numbered_refs = list(
             re.finditer(r"(?im)^\s*\d{1,2}\.\s+REFERENCIAS(?:\s+BIBLIOGR[AÁ]FICAS)?\s*(?:•|\n|$)", full_text)
         )
         if numbered_refs:
             final_ref = numbered_refs[-1].start()
             if final_ref > idx:
-                idx = final_ref
+                # Solo subir si ese REFERENCIAS también arranca un listado desde el inicio.
+                final_first = _first_bibliography_entry_number(full_text[final_ref : final_ref + 2500])
+                if final_first is None or final_first <= 5:
+                    idx = final_ref
         concl = re.search(r"(?im)^\s*\d{1,2}\.\s+CONCLUSI[ÓO]N", full_text)
         if concl and concl.start() >= idx:
             after_concl = [m.start() for m in numbered_refs if m.start() > concl.start()]

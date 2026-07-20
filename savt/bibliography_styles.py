@@ -359,10 +359,19 @@ def detect_citation_style_with_body(body: str, bib_text: str) -> str:
     style = detect_citation_style(body, bib_text)
     if not (body or "").strip():
         return style
-    from savt.citations import count_apa_citation_appearances, count_numeric_citation_appearances
+    from savt.citations import (
+        count_apa_citation_appearances,
+        count_numeric_citation_appearances,
+        extract_apa_citations,
+    )
 
     apa_n = count_apa_citation_appearances(body)
     num_n = count_numeric_citation_appearances(body, max_ref=500)
+    apa_keys, _ = extract_apa_citations(body)
+    # Cuerpo claramente APA aunque la bibliografía use [45]… (Vancouver + autor-año).
+    if len(apa_keys) >= 15 or apa_n >= 50:
+        if apa_n >= num_n * 0.45 or len(apa_keys) >= 20:
+            return "apa"
     if apa_n >= 12 and apa_n >= max(num_n, 1) * 2:
         return "apa"
     if num_n >= 12 and num_n > apa_n * 2:
@@ -410,10 +419,47 @@ def _collect_apa_starts(bib_text: str) -> list[int]:
     return sorted(starts)
 
 
+def parse_bracketed_apa_bibliography(bib_text: str) -> dict[int, ReferenceEntry]:
+    """Bibliografía híbrida: «[45] Autor, A. (2010). Título…» (número Vancouver + ficha APA)."""
+    entries: dict[int, ReferenceEntry] = {}
+    if not bib_text:
+        return entries
+    text = normalize_bibliography_text(bib_text)
+    markers = list(re.finditer(r"(?m)^\s*\[(\d{1,3})\]\s+", text))
+    if len(markers) < 3:
+        return entries
+    for idx, match in enumerate(markers):
+        num = int(match.group(1))
+        start = match.end()
+        end = markers[idx + 1].start() if idx + 1 < len(markers) else len(text)
+        raw = _normalize(text[start:end])
+        if len(raw) < 20:
+            continue
+        doi_match = re.search(r"https?://doi\.org/([^\s]+)", raw, re.IGNORECASE)
+        if not doi_match:
+            doi_match = re.search(r"doi[:.]?\s*(10\.\S+)", raw, re.IGNORECASE)
+        year_match = re.search(r"(?:\s|,)\s*\((\d{4}[a-z]?)(?:,\s*[A-Za-z]+)?\)", raw)
+        doi_value = doi_match.group(1).rstrip(".,;") if doi_match else ""
+        doi_value = re.sub(r"^https?://doi\.org/", "", doi_value, flags=re.I)
+        entries[num] = ReferenceEntry(
+            number=num,
+            key=apa_entry_key(raw),
+            raw=raw,
+            title=raw[:180],
+            doi=doi_value,
+            year=year_match.group(1)[:4] if year_match else "",
+        )
+    return entries
+
+
 def parse_apa_bibliography(bib_text: str) -> dict[int, ReferenceEntry]:
     entries: dict[int, ReferenceEntry] = {}
     if not bib_text:
         return entries
+
+    hybrid = parse_bracketed_apa_bibliography(bib_text)
+    if len(hybrid) >= 5:
+        return hybrid
 
     bib_text = normalize_bibliography_text(bib_text)
     starts = _collect_apa_starts(bib_text)
@@ -497,8 +543,17 @@ def extract_apa_citations(body: str) -> tuple[set[str], list[tuple[str, str]]]:
 
 def parse_bibliography_by_style(bib_text: str, style: str) -> dict[int, ReferenceEntry]:
     if style == "apa":
-        return parse_apa_bibliography(bib_text)
-    return parse_bibliography(normalize_bibliography_text(bib_text))
+        apa = parse_apa_bibliography(bib_text)
+        if len(apa) >= 3:
+            return apa
+        hybrid = parse_bracketed_apa_bibliography(bib_text)
+        return hybrid if len(hybrid) >= 3 else apa
+    numbered = parse_bibliography(normalize_bibliography_text(bib_text))
+    if numbered and sum(1 for r in numbered.values() if r.key) < max(3, len(numbered) // 3):
+        hybrid = parse_bracketed_apa_bibliography(bib_text)
+        if len(hybrid) >= max(5, int(len(numbered) * 0.6)):
+            return hybrid
+    return numbered
 
 
 def infer_topic_keywords_from_document(full_text: str, body: str, filename: str) -> list[str]:

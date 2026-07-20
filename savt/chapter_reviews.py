@@ -178,13 +178,19 @@ def _missing_guidance(missing_labels: list[str]) -> tuple[str, str, str]:
         return "", "", ""
     whys = []
     fixes = []
+    named = [CHECK_LABELS.get(l, l) for l in missing_labels]
     for label in missing_labels:
         guide = CHECK_GUIDANCE.get(label, {})
         if guide.get("why"):
             whys.append(f"**{CHECK_LABELS.get(label, label)}:** {guide['why']}")
         if guide.get("how_to_fix"):
             fixes.append(f"**{CHECK_LABELS.get(label, label)}:** {guide['how_to_fix']}")
-    summary = "Faltan o no están claros: " + ", ".join(CHECK_LABELS.get(l, l) for l in missing_labels) + "."
+    summary = (
+        f"SAVT no pudo verificar con claridad: {', '.join(named)}. "
+        "Eso no siempre significa que el contenido esté ausente: a veces el título "
+        "es distinto, el bloque es breve o el marcador esperado no aparece en el texto. "
+        "Revise el detalle en «Por qué importa» y «Cómo corregir»."
+    )
     return summary, "\n".join(whys), "\n".join(fixes)
 
 
@@ -239,9 +245,35 @@ def _review_from_checks(section_key: str, block: dict, required: set[str] | None
     summary, why, how_to_fix = _missing_guidance(missing + partial)
 
     if status == "ok":
-        summary = "El apartado cumple los criterios detectados automáticamente."
-        why = "La estructura y el contenido mínimo esperado están presentes."
-        how_to_fix = ""
+        passed = [
+            CHECK_LABELS.get(c["label"], c["label"])
+            for c in checks
+            if c.get("ok") and c["label"] in required
+        ]
+        words_hint = ""
+        length = block.get("length")
+        if isinstance(length, int) and length > 0:
+            words_hint = f" Extensión aproximada del bloque evaluado: {length:,} caracteres."
+        if passed:
+            summary = (
+                f"Se verificaron estos elementos: {', '.join(passed[:8])}."
+                + words_hint
+                + " Conviene que el director confirme la profundidad argumentativa."
+            )
+        else:
+            summary = (
+                "El apartado está presente y supera los umbrales automáticos mínimos."
+                + words_hint
+                + " Revise con el director si el desarrollo es suficiente para el nivel de titulación."
+            )
+        why = (
+            "Un apartado «completo» en SAVT significa que se detectaron los componentes "
+            "esperados (extensión, marcadores, vínculos); no sustituye la evaluación cualitativa del jurado."
+        )
+        how_to_fix = (
+            "Si el jurado pide más profundidad, amplíe evidencia, contraste con literatura "
+            "y cierre explícito hacia objetivos o pregunta."
+        )
     elif status == "partial" and uncertain and not present:
         summary = (
             "Localización incierta: no se pudo afirmar con claridad que el apartado esté ausente."
@@ -504,12 +536,17 @@ def build_bibliography_review(bib_dashboard: dict, warnings_list: list[dict]) ->
     if unmatched <= 3 and not doi_not_resolved and not doi_invalid:
         status = "partial"
 
-    uncited = max(0, total_refs - int(cited_in_text or 0)) if cited_in_text else None
-    metrics_hint = f"{total_refs} entradas"
-    if cited_in_text:
-        metrics_hint += f", ~{cited_in_text} citadas en texto"
+    uncited = bib_dashboard.get("uncited_in_body")
+    if uncited is None:
+        uncited = max(0, total_refs - int(cited_in_text or 0)) if cited_in_text else None
+    text_unique = (bib_dashboard.get("details") or {}).get("text_unique_citations")
+    metrics_hint = f"{total_refs} entradas en bibliografía"
+    if cited_in_text is not None:
+        metrics_hint += f", {cited_in_text} emparejadas con citas del texto"
+    if text_unique and int(text_unique) != int(cited_in_text or 0):
+        metrics_hint += f", {text_unique} fuentes distintas citadas en el cuerpo"
     if uncited:
-        metrics_hint += f", ~{uncited} no citadas en el cuerpo"
+        metrics_hint += f", {uncited} entradas sin cita detectada en el cuerpo"
 
     return {
         "key": "bibliografia",
@@ -616,25 +653,36 @@ def _soften_reviews_for_compendium(reviews: list[dict], *, has_objectives: bool)
             item["ok"] = False
             item["partial"] = True
             item["summary"] = (
-                "Tesis por capítulos: la introducción y el planteamiento pueden estar "
-                "distribuidos entre capítulos. Se detectaron objetivos; revise el Cap. III "
-                "y las introducciones de cada artículo."
+                "En tesis por capítulos/artículos no siempre hay una sola «Introducción» monográfica. "
+                "SAVT detectó objetivos: revise que el capítulo de planteamiento (p. ej. Cap. III) "
+                "declare el problema y que cada artículo tenga su propia introducción. "
+                "Si faltan justificación o pregunta explícita en un único capítulo, no implica "
+                "automáticamente incumplimiento si están repartidas."
+            )
+            item["why"] = (
+                "El jurado evalúa si el problema queda claro para el lector, no solo si existe "
+                "un apartado titulado exactamente «Introducción»."
             )
             item["how_to_fix"] = (
-                "En tesis por compendio, asegure que el capítulo de planteamiento/objetivos "
-                "exprese el problema y que cada artículo empírico tenga su propia introducción."
+                "Unifique en el capítulo de planteamiento: problema, justificación y objetivos; "
+                "y revise que cada artículo empírico abra con su contexto y propósito."
             )
         elif key == "marco_teorico" and item.get("status") == "fail":
             item["status"] = "partial"
             item["ok"] = False
             item["partial"] = True
             item["summary"] = (
-                "Tesis por capítulos: el marco teórico suele estar en Cap. I–II (revisión). "
-                "No se exige un único capítulo titulado «Marco teórico»."
+                "En tesis por capítulos el marco suele estar en Cap. I–II (revisión de literatura) "
+                "o dentro de cada artículo; no hace falta un único título «Marco teórico». "
+                "Verifique que haya estado del arte, autores clave y vínculo con los objetivos."
+            )
+            item["why"] = (
+                "Sin anclaje teórico, resultados y discusión quedan descriptivos y el aporte "
+                "es más difícil de sostener ante el jurado."
             )
             item["how_to_fix"] = (
-                "Verifique que los capítulos de revisión cubran el estado del arte "
-                "vinculado a los objetivos del Cap. III."
+                "Revise Cap. I–II o las revisiones de cada artículo: autores, conceptos, "
+                "brechas y cierre hacia la pregunta/objetivos del trabajo."
             )
         elif key == "conclusiones" and item.get("status") in {"fail", "partial"}:
             # La respuesta a la pregunta puede estar en la discusión del artículo empírico
@@ -643,8 +691,16 @@ def _soften_reviews_for_compendium(reviews: list[dict], *, has_objectives: bool)
                 item["partial"] = True
                 item["ok"] = False
             item["summary"] = (
-                "Tesis por capítulos: las conclusiones pueden estar en cada artículo "
-                "(discusión/conclusión del Cap. empírico) además de un cierre global."
+                "En tesis por capítulos las conclusiones pueden estar al final de cada artículo "
+                "y/o en un cierre global. SAVT busca un cierre que retome objetivos o pregunta; "
+                "si solo hay conclusiones locales, márquelas en el índice al confirmar la estructura."
+            )
+            item["why"] = (
+                "El jurado espera ver qué se demostró respecto de lo propuesto al inicio."
+            )
+            item["how_to_fix"] = (
+                "Agregue o refuerce un apartado de conclusiones generales que responda "
+                "objetivos/pregunta, señale limitaciones y líneas futuras."
             )
         elif key == "bibliografia" and item.get("status") == "fail":
             item["status"] = "partial"

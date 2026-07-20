@@ -80,10 +80,14 @@ def citation_reading_summary(recon: dict, *, total_refs: int | None = None) -> s
     bib_used = int(recon.get("document_unique_cited") or 0)
     total = int(total_refs if total_refs is not None else recon.get("total_references") or 0)
     uncited = int(recon.get("uncited_references") or 0)
+    if total and uncited > total:
+        uncited = max(0, total - bib_used)
     unmatched = int(recon.get("unmatched_citations") or 0)
+    style = str(recon.get("style") or "").lower()
+    unique_label = "autor-año únicos" if style == "apa" else "referencias distintas"
     tail = f"; **{unmatched}** cita(s) en el texto sin entrada bibliográfica clara." if unmatched else "."
     return (
-        f"**{text_unique} fuentes distintas** en el cuerpo (autor-año únicos; "
+        f"**{text_unique} fuentes distintas** en el cuerpo ({unique_label}; "
         f"**{appearances}** apariciones si se repiten). "
         f"En la bibliografía final (**{total}** entradas), **{bib_used}** están citadas al menos una vez "
         f"y **{uncited}** no aparecen en el texto{tail}"

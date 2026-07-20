@@ -378,10 +378,19 @@ def build_bibliography_details(
     unmatched_count = len(unmatched_apa) if style == "apa" else 0
 
     if style == "apa":
+        from savt.bibliography_styles import apa_keys_match
+
         cited_keys = filter_plausible_apa_keys(parsed.get("cited_keys") or set())
-        cited_in_text = len(cited_keys)
+        text_unique = len(cited_keys)
+        # Entradas de la bibliografía que coinciden con al menos una cita del cuerpo
+        cited_in_text = sum(
+            1
+            for ref in bibliography.values()
+            if ref.key and apa_keys_match(ref.key, cited_keys)
+        )
     else:
         cited_in_text = len(parsed.get("cited_numbers") or set())
+        text_unique = cited_in_text
 
     coverage = "adecuada"
     if len(bibliography) == 0:
@@ -395,6 +404,7 @@ def build_bibliography_details(
         "style": "APA" if style == "apa" else "Vancouver numerado",
         "total_refs": len(bibliography),
         "citations_found": cited_in_text,
+        "text_unique_citations": text_unique,
         "bibliography_entries": len(bibliography),
         "uncited_in_body": max(0, len(bibliography) - cited_in_text),
         "unmatched_count": unmatched_count,

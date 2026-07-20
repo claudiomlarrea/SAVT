@@ -135,6 +135,16 @@ def _is_false_positive_numeric_citation(chunk: str, body: str, start: int) -> bo
     numbers = [int(part) for part in parts]
     if 0 in numbers:
         return True
+    # Enumeraciones del cuerpo: «(1) hidroxilasa» / «(2) alcohol…» (no son citas).
+    after = body[start + len(chunk) + 1 : start + len(chunk) + 24]
+    if re.match(r"^\)\s*[A-Za-zÁÉÍÓÚáéíóúñ]", body[start : start + len(chunk) + 24]):
+        # El patrón ya capturó solo el interior; mirar justo después del cierre.
+        close = body.find(")", start)
+        if close != -1:
+            tail = body[close + 1 : close + 30].lstrip()
+            if re.match(r"^[A-Za-zÁÉÍÓÚáéíóúñ]", tail) and not re.match(r"^\d{4}", tail):
+                if len(numbers) == 1 and numbers[0] <= 30:
+                    return True
     if len(numbers) == 1 and 1 <= numbers[0] <= 200:
         return False
     before = body[max(0, start - 80) : start]

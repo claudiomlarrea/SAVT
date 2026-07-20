@@ -25,6 +25,14 @@ def collapse_soft_line_breaks(text: str) -> str:
         if not buffer:
             buffer = stripped
             continue
+        # Entradas bibliográficas numeradas / entre corchetes: nunca fusionar con la línea previa
+        # (evita «BIBLIOGRAFÍA [1] Autor…» y perder el ancla ^\[1\]).
+        if re.match(r"^\[\d{1,3}\]\s+\S", stripped) or re.match(
+            r"^\d{1,3}\.\s+[A-Za-zÁÉÍÓÚáéíóúñ\"'(]", stripped
+        ):
+            flush()
+            buffer = stripped
+            continue
         if re.match(r"^\d+\.", stripped):
             flush()
             buffer = stripped

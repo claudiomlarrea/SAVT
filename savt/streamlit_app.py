@@ -378,6 +378,22 @@ def render_structure_and_checklist(dashboard: dict) -> None:
             st.caption(estado)
         with col_text:
             st.markdown(resumen)
+            missing = review.get("missing") or []
+            partial_items = review.get("partial_items") or []
+            if missing or partial_items:
+                from savt.chapter_reviews import CHECK_LABELS
+
+                labels = [CHECK_LABELS.get(x, x) for x in (missing + partial_items)]
+                st.caption("Elementos: " + "; ".join(labels))
+            if review.get("why"):
+                st.markdown(f"**Por qué importa:** {review['why']}")
+            if review.get("how_to_fix"):
+                st.markdown(f"**Cómo corregir:** {review['how_to_fix']}")
+            elif item.get("ok"):
+                st.caption(
+                    "Completo según detección automática: el director debe confirmar "
+                    "profundidad argumentativa y coherencia del apartado."
+                )
         if idx < len(items) - 1:
             st.divider()
 
@@ -409,11 +425,25 @@ def render_evaluation_and_findings(dashboard: dict) -> None:
             status = _review_status_label(review)
             with st.expander(f"{review.get('title')} — {status}", expanded=True):
                 if review.get("summary"):
-                    st.write(review["summary"])
+                    st.markdown(f"**Qué encontró SAVT:** {review['summary']}")
+                missing = review.get("missing") or []
+                partial_items = review.get("partial_items") or []
+                if missing or partial_items:
+                    from savt.chapter_reviews import CHECK_LABELS
+
+                    labels = [
+                        CHECK_LABELS.get(x, x) for x in (missing + partial_items)
+                    ]
+                    st.markdown("**Elementos a revisar:** " + "; ".join(labels))
                 if review.get("why"):
                     st.markdown(f"**Por qué importa:** {review['why']}")
                 if review.get("how_to_fix"):
                     st.info(f"**Cómo corregir:** {review['how_to_fix']}")
+                else:
+                    st.caption(
+                        "Si el apartado está marcado como completo, igual conviene "
+                        "releerlo con el director: SAVT valida presencia y marcadores, no calidad argumentativa."
+                    )
 
     st.markdown("### Hallazgos prioritarios")
     if not warnings:
