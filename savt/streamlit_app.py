@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import io
 import sys
 
 import streamlit as st
@@ -55,22 +54,6 @@ def render_header() -> None:
             """,
             unsafe_allow_html=True,
         )
-
-
-def _clear_audit_session_keys() -> None:
-    for key in (
-        "parsed_doc",
-        "detected_sections",
-        "structure_ready",
-        "report",
-        "manual_outline_text",
-        "index_reviewed_checkbox",
-        "index_confirmation_editor",
-        "uploaded_name",
-        "paste_doc_name",
-        "resolved_config",
-    ):
-        st.session_state.pop(key, None)
 
 
 def render_paste_sections_form() -> list[dict] | None:
