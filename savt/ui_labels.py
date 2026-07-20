@@ -71,3 +71,20 @@ def citation_style_label(style: str | None) -> str:
     if normalized == "apa":
         return "APA"
     return style.upper()
+
+
+def citation_reading_summary(recon: dict, *, total_refs: int | None = None) -> str:
+    """Texto breve para jurados: fuentes únicas vs apariciones vs bibliografía."""
+    appearances = int(recon.get("body_occurrences") or 0)
+    text_unique = int(recon.get("text_unique_raw") or recon.get("document_unique_cited") or 0)
+    bib_used = int(recon.get("document_unique_cited") or 0)
+    total = int(total_refs if total_refs is not None else recon.get("total_references") or 0)
+    uncited = int(recon.get("uncited_references") or 0)
+    unmatched = int(recon.get("unmatched_citations") or 0)
+    tail = f"; **{unmatched}** cita(s) en el texto sin entrada bibliográfica clara." if unmatched else "."
+    return (
+        f"**{text_unique} fuentes distintas** en el cuerpo (autor-año únicos; "
+        f"**{appearances}** apariciones si se repiten). "
+        f"En la bibliografía final (**{total}** entradas), **{bib_used}** están citadas al menos una vez "
+        f"y **{uncited}** no aparecen en el texto{tail}"
+    )

@@ -422,6 +422,7 @@ def render_evaluation_and_findings(dashboard: dict) -> None:
 def render_extra_evidence(dashboard: dict) -> None:
     """3) Citas y bibliografía con métricas claras (apariciones ≠ refs distintas ≠ entradas)."""
     from savt.section_audit import section_audit_ui_rows
+    from savt.ui_labels import citation_reading_summary
 
     st.markdown("## 3. Citas por capítulo y bibliografía")
     recon = dashboard.get("citation_reconciliation") or {}
@@ -438,28 +439,30 @@ def render_extra_evidence(dashboard: dict) -> None:
     uncited = recon.get("uncited_references")
     if uncited is None:
         uncited = max(0, int(total_bib or 0) - int(distinct or 0))
-    unmatched = bib.get("unmatched_citations") or 0
+    unmatched = bib.get("unmatched_citations") or recon.get("unmatched_citations") or 0
 
-    st.info(
-        "**Cómo leer los números:**\n\n"
-        f"- **{appearances} apariciones** = veces que se colocó una cita en el documento "
-        "(la misma fuente puede contarse varias veces).\n"
-        f"- **{distinct} referencias distintas** = fuentes únicas citadas al menos una vez en el texto.\n"
-        f"- **{total_bib} entradas en bibliografía** = ítems listados al final (no es lo mismo que citas).\n"
-        f"- **{uncited} no citadas** = están en la bibliografía pero no aparecen en el cuerpo."
-    )
+    text_unique = recon.get("text_unique_raw")
+    if text_unique is None:
+        text_unique = distinct
+    text_unique = int(text_unique or 0)
+    distinct = int(distinct or 0)
+    appearances = int(appearances or 0)
+    uncited = int(uncited or 0)
+    unmatched = int(unmatched or 0)
+
+    st.info(citation_reading_summary(recon, total_refs=int(total_bib or 0)))
 
     m1, m2, m3, m4 = st.columns(4)
     m1.metric("Apariciones en el texto", appearances)
-    m2.metric("Refs distintas citadas", distinct)
-    m3.metric("Entradas en bibliografía", total_bib)
-    m4.metric("No citadas en el cuerpo", uncited)
+    m2.metric("Fuentes únicas (texto)", text_unique)
+    m3.metric("Entradas bib. citadas", distinct)
+    m4.metric("Entradas en bibliografía", total_bib)
 
     st.markdown("### Por capítulo")
     st.caption(
-        "En cada capítulo: **Veces citadas** = apariciones; **Refs distintas** = fuentes únicas en ese capítulo "
-        "(no suman al total del documento porque se repiten entre capítulos). "
-        "Las introducciones dentro de cada capítulo aparecen como «Cap. N › 1. INTRODUCCIÓN»."
+        "Por capítulo: **Fuentes únicas** = autor-año distintos en ese tramo. "
+        "En la fila **TOTAL**, **Fuentes únicas** es el total del documento y "
+        "**Bib. emparejadas** cuántas entradas de la lista final están citadas."
     )
     raw_rows = recon.get("reconciliation_rows") or []
     display_rows = []
@@ -473,7 +476,8 @@ def render_extra_evidence(dashboard: dict) -> None:
                 "Apartado": apartado,
                 "Rol": _clean_cell(row.get("Rol académico")),
                 "Veces citadas": _clean_cell(row.get("Apariciones cita")),
-                "Refs distintas": _clean_cell(row.get("N° refs distintos")),
+                "Fuentes únicas": _clean_cell(row.get("N° refs distintos")),
+                "Bib. emparejadas": _clean_cell(row.get("Refs bib. emparejadas", "—")),
                 "Tipo": tipo,
             }
         )
@@ -548,6 +552,8 @@ def render_extra_evidence(dashboard: dict) -> None:
 
 def render_executive_report(dashboard: dict, report, base_name: str) -> None:
     """Pantalla principal alineada a las hojas del Excel SAVT."""
+    from savt.ui_labels import citation_reading_summary
+
     st.markdown("## Resultado de la auditoría")
     st.caption("Equivalente a la hoja «Resumen» del Excel.")
     left, right = st.columns([1, 1.2])
@@ -570,11 +576,30 @@ def render_executive_report(dashboard: dict, report, base_name: str) -> None:
 
     bib = dashboard.get("bibliography_dashboard") or {}
     recon = dashboard.get("citation_reconciliation") or {}
+    total_bib = int(bib.get("total_refs") or recon.get("total_references") or 0)
+    text_unique = int(recon.get("text_unique_raw") or recon.get("document_unique_cited") or 0)
+    bib_used = int(recon.get("document_unique_cited") or bib.get("citations_found") or 0)
+    appearances = int(recon.get("body_occurrences") or 0)
+
     meta1, meta2, meta3, meta4 = st.columns(4)
     meta1.metric("Palabras (cuerpo)", report.word_count if report else "—")
-    meta2.metric("Apariciones de cita", recon.get("body_occurrences") or "—")
-    meta3.metric("Refs distintas citadas", recon.get("document_unique_cited") or bib.get("citations_found") or 0)
-    meta4.metric("Entradas bibliografía", bib.get("total_refs") or 0)
+    meta2.metric(
+        "Apariciones de cita",
+        appearances or "—",
+        help="Veces que aparece una cita en el texto (la misma fuente puede contarse varias veces).",
+    )
+    meta3.metric(
+        "Fuentes únicas en el texto",
+        text_unique or "—",
+        help="Autores-año distintos detectados en el cuerpo; cada fuente cuenta una sola vez.",
+    )
+    meta4.metric(
+        "Bibliografía citada",
+        f"{bib_used} / {total_bib}" if total_bib else bib_used,
+        help="Entradas de la lista bibliográfica que están citadas al menos una vez.",
+    )
+    if recon:
+        st.caption(citation_reading_summary(recon, total_refs=total_bib))
     st.caption(
         f"Errores críticos: **{dashboard.get('errors', 0)}** · "
         f"Advertencias: **{dashboard.get('warnings', 0)}**"

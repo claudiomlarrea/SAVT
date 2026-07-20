@@ -81,11 +81,19 @@ def build_report_xlsx(report: AuditReport, dashboard: dict) -> bytes:
         {"Campo": "Checklist", "Valor": checklist.get("status", "—")},
         {"Campo": "Palabras (cuerpo)", "Valor": report.word_count},
         {
+            "Campo": "Apariciones de cita (total)",
+            "Valor": (dashboard.get("citation_reconciliation") or {}).get("body_occurrences", "—"),
+        },
+        {
+            "Campo": "Fuentes únicas en el texto",
+            "Valor": (dashboard.get("citation_reconciliation") or {}).get("text_unique_raw", "—"),
+        },
+        {
             "Campo": "Entradas en bibliografía",
             "Valor": (dashboard.get("bibliography_dashboard") or {}).get("total_refs", 0),
         },
         {
-            "Campo": "Referencias citadas en texto",
+            "Campo": "Entradas bibliográficas citadas (≥1 vez)",
             "Valor": (dashboard.get("citation_reconciliation") or {}).get(
                 "document_unique_cited",
                 (dashboard.get("bibliography_dashboard") or {}).get("citations_found", 0),

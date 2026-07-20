@@ -378,7 +378,8 @@ def build_citation_reconciliation(
             "Apartado": "TOTAL documento (cuerpo)",
             "Rol académico": "—",
             "Apariciones cita": body_occurrences,
-            "N° refs distintos": document_unique,
+            "N° refs distintos": text_unique_raw,
+            "Refs bib. emparejadas": document_unique,
             "Tipo": "Total / resumen",
         },
     ]
@@ -391,8 +392,11 @@ def build_citation_reconciliation(
             f"(una misma de las {total_refs} puede citarse muchas veces)."
         ),
         (
-            f"**Refs distintas emparejadas con la bibliografía ({document_unique})** = "
-            f"cuántas de las {total_refs} entradas aparecen al menos una vez en el cuerpo."
+            f"**Fuentes únicas en el texto ({text_unique_raw})** = autor-año distintos detectados en el cuerpo."
+        ),
+        (
+            f"**Entradas bibliográficas emparejadas ({document_unique})** = "
+            f"cuántas de las {total_refs} entradas de la lista aparecen citadas al menos una vez."
         ),
         (
             f"**Bibliografía:** {total_refs} entradas · Citadas ≥1 vez: {document_unique} · "
