@@ -35,7 +35,8 @@ def _find_block(body: str, sections: dict[str, str], keywords: list[str]) -> str
         key = alias_map.get(keyword.lower())
         if key and section_map.get(key):
             text = section_map[key]
-            if len(text) > 200:
+            # En modo pegado / mapa confirmado aceptar bloques cortos pero reales.
+            if text and text.strip():
                 return text
 
     mapped = get_section_map(body)
@@ -77,6 +78,7 @@ def _check_items(text: str, items: list[tuple[str, list[str]]]) -> list[dict]:
 
 def _merge_intro_checks(checks: list[dict], parsed: dict) -> list[dict]:
     merged = []
+    sm = parsed.get("section_map") or {}
     for check in checks:
         label = check["label"]
         ok = check["ok"]
@@ -85,10 +87,11 @@ def _merge_intro_checks(checks: list[dict], parsed: dict) -> list[dict]:
         if label == "objetivos" and (parsed.get("objectives") or objectives_headings_present(parsed.get("body", ""))):
             ok = True
         if label == "objetivos":
-            sm = parsed.get("section_map") or {}
             obj_text = sm.get("objetivos") or ""
-            if len(obj_text) > 200 and re.search(r"objetivo", obj_text, re.I):
+            if len(obj_text) > 80 and re.search(r"objetivo", obj_text, re.I):
                 ok = True
+        if label == "justificación" and (sm.get("justificacion") or "").strip():
+            ok = True
         merged.append({**check, "ok": ok})
     return merged
 

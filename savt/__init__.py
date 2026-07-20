@@ -1,4 +1,4 @@
 """SAVT — Sistema de Auditoría y Verificación de Tesis."""
 
-__version__ = "0.5.2"
+__version__ = "0.6.0"
 __app_name__ = "Sistema de Auditoría y Verificación de Tesis"
