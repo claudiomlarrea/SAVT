@@ -259,8 +259,7 @@ def render_structure_and_checklist(dashboard: dict) -> None:
         st.info("No hay checklist disponible.")
         return
 
-    check_rows = []
-    for item in items:
+    for idx, item in enumerate(items):
         key = item.get("section_key") or ""
         review = reviews.get(key) or {}
         title = review.get("title") or (item.get("label") or "—").split(" — ")[0].replace(" completo", "")
@@ -270,9 +269,15 @@ def render_structure_and_checklist(dashboard: dict) -> None:
             estado = "Revisión parcial"
         else:
             estado = "Requiere revisión"
-        resumen = (review.get("summary") or "")[:160]
-        check_rows.append({"Apartado": title, "Estado": estado, "Resumen": resumen or "—"})
-    st.dataframe(check_rows, hide_index=True, use_container_width=True)
+        resumen = (review.get("summary") or "").strip() or "—"
+        col_label, col_text = st.columns([1, 2.2], gap="medium")
+        with col_label:
+            st.markdown(f"**{title}**")
+            st.caption(estado)
+        with col_text:
+            st.markdown(resumen)
+        if idx < len(items) - 1:
+            st.divider()
 
 
 def render_evaluation_and_findings(dashboard: dict) -> None:
