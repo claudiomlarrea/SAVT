@@ -84,6 +84,11 @@ def _merge_intro_checks(checks: list[dict], parsed: dict) -> list[dict]:
             ok = True
         if label == "objetivos" and (parsed.get("objectives") or objectives_headings_present(parsed.get("body", ""))):
             ok = True
+        if label == "objetivos":
+            sm = parsed.get("section_map") or {}
+            obj_text = sm.get("objetivos") or ""
+            if len(obj_text) > 200 and re.search(r"objetivo", obj_text, re.I):
+                ok = True
         merged.append({**check, "ok": ok})
     return merged
 
@@ -272,6 +277,8 @@ def audit_structure(parsed: dict) -> tuple[list[Finding], dict]:
     question_tokens = re.findall(r"[a-záéíóúñ]{5,}", question_keywords)[:6]
     answered_tokens = sum(1 for t in question_tokens if t in conclusions_block.lower())
     conclusions_question = explicit_answer or answered_tokens >= max(2, len(question_tokens) // 2)
+    if parsed.get("thesis_type") == "compendio" and objectives_ok and not parsed.get("research_questions"):
+        conclusions_question = True
 
     conclusion_checks = [
         {"label": "responde objetivos", "ok": conclusions_objectives},
@@ -324,6 +331,8 @@ def audit_structure(parsed: dict) -> tuple[list[Finding], dict]:
     intro_missing = [c["label"] for c in intro_checks if not c["ok"]]
     core_intro = {"problema", "justificación", "pregunta", "objetivos"}
     intro_core_missing = [c for c in intro_missing if c in core_intro]
+    if parsed.get("thesis_type") == "compendio" and objectives_ok:
+        intro_core_missing = [c for c in intro_core_missing if c != "pregunta"]
     if intro_core_missing:
         findings.append(
             Finding(
@@ -446,7 +455,9 @@ def audit_structure(parsed: dict) -> tuple[list[Finding], dict]:
                 )
             )
 
-    if not conclusions_question:
+    if not conclusions_question and not (
+        parsed.get("thesis_type") == "compendio" and objectives_ok
+    ):
         findings.append(
             Finding(
                 module="Conclusiones",

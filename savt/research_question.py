@@ -10,6 +10,42 @@ def audit_research_question(parsed: dict) -> tuple[list[Finding], dict]:
     body = parsed["body"]
     questions = parsed.get("research_questions") or []
     conclusions = (parsed.get("conclusions") or "").lower()
+    thesis_type = parsed.get("thesis_type") or "clasica"
+    section_map = parsed.get("section_map") or {}
+    objectives_block = (section_map.get("objetivos") or parsed.get("objectives") or "").strip()
+
+    if thesis_type == "compendio" and not questions:
+        has_objectives = bool(
+            re.search(r"objetivo\s+general", objectives_block or body, re.IGNORECASE)
+        ) or bool(parsed.get("objectives"))
+        if has_objectives:
+            checks = [
+                {"label": "Claramente formulada", "ok": False, "partial": True},
+                {"label": "Aparece en introducción", "ok": False, "partial": True},
+                {
+                    "label": "Se responde explícitamente en conclusiones",
+                    "ok": False,
+                    "partial": True,
+                },
+            ]
+            findings.append(
+                Finding(
+                    module="Pregunta de investigación",
+                    severity="info",
+                    area="Coherencia",
+                    title="Compendio: objetivos en lugar de pregunta única",
+                    detail=(
+                        "En tesis por artículos/capítulos el foco suele declararse con objetivos "
+                        "(p. ej. Cap. III) en lugar de una pregunta monográfica en la introducción."
+                    ),
+                    why="No implica incoherencia si los objetivos guían cada artículo.",
+                    how_to_fix=(
+                        "Opcional: formule una pregunta integradora en el capítulo de planteamiento "
+                        "o vincule explícitamente cada objetivo con los artículos empíricos."
+                    ),
+                )
+            )
+            return findings, {"question": "", "checks": checks}
 
     if not questions:
         findings.append(

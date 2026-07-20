@@ -164,8 +164,38 @@ def _add_numeric_chunk(
             cited.add(num)
 
 
+def plausible_apa_year(year: str) -> bool:
+    if not year or len(year) < 4 or not year[:4].isdigit():
+        return False
+    y = int(year[:4])
+    return 1900 <= y <= 2030
+
+
+def is_plausible_apa_citation_key(key: str) -> bool:
+    """Descarta claves OCR/ruido (p. ej. af|4796) sin apellido reconocible."""
+    if not key or "|" not in key:
+        return False
+    author, year = key.split("|", 1)
+    author = author.strip().lower()
+    year = year.strip()[:4]
+    if not plausible_apa_year(year):
+        return False
+    if author.isdigit():
+        return False
+    if len(author) <= 2:
+        return False
+    return True
+
+
+def filter_plausible_apa_keys(keys: set[str] | list[str]) -> set[str]:
+    return {k for k in keys if is_plausible_apa_citation_key(k)}
+
+
 def _apa_inner_valid(inner: str) -> bool:
     inner = re.sub(r"\s+", " ", inner).strip()
+    year_match = re.search(r"\b(19\d{2}|20[0-3]\d)\b", inner)
+    if not year_match or not plausible_apa_year(year_match.group(1)):
+        return False
     if re.search(r"[A-Za-zÁÉÍÓÚáéíóúñ]{3}.*,\s*\d{4}", inner):
         return True
     if re.search(r"[A-ZÁÉÍÓÚÑ]{2,}.*\d{4}", inner):
@@ -219,7 +249,7 @@ def detect_citations(body: str, *, max_ref: int = 500) -> CitationDetectionResul
                 if not _apa_inner_valid(inner):
                     continue
                 key = apa_citation_key(inner)
-                if key:
+                if key and is_plausible_apa_citation_key(key):
                     keys_in_paragraph.add(key)
         for match in CORPORATE_CITATION_PATTERN.finditer(paragraph):
             key = _corporate_citation_key(match.group(1), match.group(2))
@@ -232,13 +262,13 @@ def detect_citations(body: str, *, max_ref: int = 500) -> CitationDetectionResul
     for match in NARRATIVE_APA_PATTERN.finditer(body):
         inner = f"{match.group(1).strip()}, {match.group(2)}"
         key = apa_citation_key(inner)
-        if key:
+        if key and is_plausible_apa_citation_key(key):
             result.cited_keys.add(key)
 
     for match in NARRATIVE_APA_ET_AL_PATTERN.finditer(body):
         inner = f"{match.group(1).strip()}, {match.group(2)}"
         key = apa_citation_key(inner)
-        if key:
+        if key and is_plausible_apa_citation_key(key):
             result.cited_keys.add(key)
 
     for match in LAW_CITATION_PATTERN.finditer(body):
@@ -280,13 +310,16 @@ def extract_cited_numbers(body: str, max_ref: int = 500) -> set[int]:
 def extract_apa_citations(body: str) -> tuple[set[str], list[tuple[str, str]]]:
     """Compatibilidad: devuelve claves autor|año y contextos de párrafo."""
     detected = detect_citations(body, max_ref=500)
-    apa_keys = {
-        key
-        for key in detected.cited_keys
-        if "|" in key
-        and not key.startswith(("law|", "norm|", "doi|", "pmid|", "isbn|", "url|"))
-    }
-    return apa_keys, detected.apa_contexts
+    apa_keys = filter_plausible_apa_keys(
+        {
+            key
+            for key in detected.cited_keys
+            if "|" in key
+            and not key.startswith(("law|", "norm|", "doi|", "pmid|", "isbn|", "url|"))
+        }
+    )
+    contexts = [(k, p) for k, p in detected.apa_contexts if k in apa_keys]
+    return apa_keys, contexts
 
 
 def strip_embedded_bibliographies(text: str) -> str:
@@ -316,6 +349,40 @@ def strip_embedded_bibliographies(text: str) -> str:
             break
     parts.append(text[last:])
     return "".join(parts)
+
+
+_EMBEDDED_BIB_HEAD = re.compile(
+    r"(?im)(?:^|\n)\s*(?:\d+\.?\s*)?(?:REFERENCIAS(?:\s+BIBLIOGR[AÁ]FICAS)?|BIBLIOGRAF[IÍ]A)\b[^\n]*\n",
+)
+
+
+def extract_embedded_bibliography_corpus(full_text: str) -> str:
+    """Concatena bloques REFERENCIAS/BIBLIOGRAFÍA del documento (compendios por capítulo)."""
+    if not full_text:
+        return ""
+    chunks: list[str] = []
+    for match in _EMBEDDED_BIB_HEAD.finditer(full_text):
+        rest = full_text[match.end() :]
+        next_cap = re.search(
+            r"(?im)(?:^|\n)\s*CAP[IÍ]TULO\s+([IVXLC]+|\d{1,2})\b",
+            rest,
+        )
+        block = rest[: next_cap.start()] if next_cap else rest[:120_000]
+        block = block.strip()
+        if len(block) > 80:
+            chunks.append(block)
+    return "\n\n".join(chunks)
+
+
+def merged_bibliography_search_text(parsed: dict) -> str:
+    primary = (parsed.get("bibliography_text") or "").strip()
+    full = parsed.get("full_text") or ""
+    embedded = extract_embedded_bibliography_corpus(full)
+    if embedded and primary and primary in embedded:
+        return embedded
+    if embedded and primary:
+        return f"{primary}\n\n{embedded}"
+    return primary or embedded
 
 
 def count_numeric_citation_appearances(body: str, max_ref: int = 500) -> int:

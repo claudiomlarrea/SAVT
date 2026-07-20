@@ -646,6 +646,14 @@ def _soften_reviews_for_compendium(reviews: list[dict], *, has_objectives: bool)
                 "Tesis por capítulos: las conclusiones pueden estar en cada artículo "
                 "(discusión/conclusión del Cap. empírico) además de un cierre global."
             )
+        elif key == "bibliografia" and item.get("status") == "fail":
+            item["status"] = "partial"
+            item["partial"] = True
+            item["ok"] = False
+            item["summary"] = (
+                "Tesis por capítulos: las referencias pueden estar repartidas por artículo. "
+                "Revise citas sin emparejar contra las bibliografías de cada capítulo."
+            )
         softened.append(item)
     return softened
 

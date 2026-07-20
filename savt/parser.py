@@ -885,6 +885,7 @@ def parse_thesis_file(source: BinaryIO | str, filename: str = "tesis.docx") -> d
     citation_style = pipeline["citation_style"]
     cited_numbers = pipeline["cited_numbers"]
     cited_keys = pipeline["cited_keys"]
+    citation_contexts_apa = pipeline.get("citation_contexts_apa") or []
 
     sections = split_sections(body)
     conclusions = extract_conclusions(body)
@@ -919,7 +920,7 @@ def parse_thesis_file(source: BinaryIO | str, filename: str = "tesis.docx") -> d
         "cited_numbers": cited_numbers,
         "cited_keys": cited_keys,
         "citation_contexts": [],
-        "citation_contexts_apa": [],
+        "citation_contexts_apa": citation_contexts_apa,
         "topic_keywords": topic_keywords,
         "document_title": document_title,
         "research_questions": extract_research_questions(body),

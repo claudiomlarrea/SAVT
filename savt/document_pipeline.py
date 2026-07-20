@@ -214,8 +214,9 @@ def run_document_pipeline(
     from savt.citations import extract_apa_citations, extract_cited_numbers, strip_embedded_bibliographies
 
     body_for_cites = strip_embedded_bibliographies(body)
+    citation_contexts_apa: list[tuple[str, str]] = []
     if citation_style == "apa":
-        cited_keys, _ = extract_apa_citations(body_for_cites)
+        cited_keys, citation_contexts_apa = extract_apa_citations(body_for_cites)
         cited_numbers: set[int] = set()
     else:
         cited_numbers = extract_cited_numbers(
@@ -254,6 +255,7 @@ def run_document_pipeline(
         "citation_style": citation_style,
         "cited_numbers": cited_numbers,
         "cited_keys": cited_keys,
+        "citation_contexts_apa": citation_contexts_apa,
         "section_map": section_map,
         "section_meta": section_meta,
         "index_sections": index_sections,

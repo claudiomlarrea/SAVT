@@ -9,6 +9,7 @@ from savt.bibliography_styles import (
     is_institutional_citation_key,
     topical_match,
 )
+from savt.citations import filter_plausible_apa_keys, is_plausible_apa_citation_key, merged_bibliography_search_text
 from savt.models import Finding, ReferenceEntry
 from savt.page_locator import format_pages, pages_for_apa_key, pages_for_ref_number
 from savt.references import validate_doi
@@ -48,8 +49,11 @@ def _plausible_year(year: str) -> bool:
 def analyze_unmatched_apa(parsed: dict, bibliography: dict[int, ReferenceEntry]) -> list[dict]:
     bib_keys = {ref.key for ref in bibliography.values() if ref.key}
     body = parsed.get("body", "")
+    bib_corpus = merged_bibliography_search_text(parsed)
     raw_map: dict[str, list[str]] = {}
     for key, paragraph in parsed.get("citation_contexts_apa", []):
+        if not is_plausible_apa_citation_key(key):
+            continue
         for match in re.finditer(r"\(([^()]*?\d{4}[a-z]?[^()]*?)\)", paragraph):
             inner = match.group(1).strip()
             if not re.search(r"[A-Za-zÁÉÍÓÚáéíóúñ]{3}.*,\s*\d{4}", inner):
@@ -62,13 +66,14 @@ def analyze_unmatched_apa(parsed: dict, bibliography: dict[int, ReferenceEntry])
                 if formatted not in raw_map[key]:
                     raw_map[key].append(formatted)
 
+    plausible_cited = filter_plausible_apa_keys(parsed.get("cited_keys", set()))
     items: list[dict] = []
-    for key in sorted(parsed.get("cited_keys", set())):
+    for key in sorted(plausible_cited):
         if apa_keys_match(key, bib_keys):
             continue
         if is_institutional_citation_key(key):
             continue
-        if citation_present_in_bibliography_text(key, parsed.get("bibliography_text", "")):
+        if citation_present_in_bibliography_text(key, bib_corpus):
             continue
         author, year = key.split("|", 1) if "|" in key else (key, "")
         cite_pages = pages_for_apa_key(body, parsed, key)
@@ -290,6 +295,7 @@ def build_bibliography_details(
     unmatched_apa: list[dict] = []
     if style == "apa":
         unmatched_apa = analyze_unmatched_apa(parsed, bibliography)
+        plausible_total = len(filter_plausible_apa_keys(parsed.get("cited_keys", set())))
         if unmatched_apa:
             lines = []
             for item in unmatched_apa[:15]:
@@ -298,16 +304,25 @@ def build_bibliography_details(
                     f"{item.get('pages_label', 'pág. no estimada')}: {cites} "
                     f"(clave: {item['key']})"
                 )
+            ratio = len(unmatched_apa) / plausible_total if plausible_total else 1.0
+            severity = "warning" if ratio >= 0.12 or len(unmatched_apa) >= 12 else "info"
+            detail = (
+                f"{len(unmatched_apa)} citas autor-año del texto no tienen entrada "
+                f"coincidente en bibliografía"
+            )
+            if plausible_total:
+                matched = plausible_total - len(unmatched_apa)
+                detail += (
+                    f" ({matched} de {plausible_total} claves distintas emparejadas; "
+                    "búsqueda incluye referencias por capítulo)."
+                )
             findings.append(
                 Finding(
                     module="Bibliografía",
-                    severity="warning",
+                    severity=severity,
                     area="Bibliografía",
                     title="Citas APA sin coincidencia exacta en bibliografía",
-                    detail=(
-                        f"{len(unmatched_apa)} citas autor-año del texto no tienen entrada "
-                        "coincidente en bibliografía."
-                    ),
+                    detail=detail + ".",
                     evidence="\n".join(lines),
                     why="Las citas sin entrada bibliográfica debilitan la trazabilidad académica.",
                     how_to_fix="Revise cada cita listada y complete o corrija la referencia en bibliografía.",
@@ -361,15 +376,8 @@ def build_bibliography_details(
     unmatched_count = len(unmatched_apa) if style == "apa" else 0
 
     if style == "apa":
-        cited_keys = parsed.get("cited_keys") or set()
-        cited_in_text = len(
-            {
-                key
-                for key in cited_keys
-                if "|" in str(key)
-                and not str(key).startswith(("law|", "norm|", "doi|", "pmid|", "isbn|", "url|"))
-            }
-        )
+        cited_keys = filter_plausible_apa_keys(parsed.get("cited_keys") or set())
+        cited_in_text = len(cited_keys)
     else:
         cited_in_text = len(parsed.get("cited_numbers") or set())
 
