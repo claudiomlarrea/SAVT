@@ -458,7 +458,8 @@ def render_extra_evidence(dashboard: dict) -> None:
     st.markdown("### Por capítulo")
     st.caption(
         "En cada capítulo: **Veces citadas** = apariciones; **Refs distintas** = fuentes únicas en ese capítulo "
-        "(no suman al total del documento porque se repiten entre capítulos)."
+        "(no suman al total del documento porque se repiten entre capítulos). "
+        "Las introducciones dentro de cada capítulo aparecen como «Cap. N › 1. INTRODUCCIÓN»."
     )
     raw_rows = recon.get("reconciliation_rows") or []
     display_rows = []

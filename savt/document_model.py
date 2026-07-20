@@ -57,6 +57,7 @@ import json
 from typing import Any
 
 from savt.word_stats import count_words
+from savt.structure_tree import ACADEMIC_SUBSECTION_ROLES
 
 
 SCHEMA_VERSION = "1.0"
@@ -222,6 +223,37 @@ def flatten_document_model_for_display(model: dict[str, Any]) -> list[dict[str, 
                 "end": chapter.get("end"),
             }
         )
+        sub_order = 0
+        for sec in chapter.get("sections") or []:
+            sec_role = str(sec.get("role") or "otros")
+            if sec_role not in ACADEMIC_SUBSECTION_ROLES:
+                continue
+            sec_words = int(sec.get("words") or 0)
+            if sec_words < 40:
+                continue
+            sub_order += 1
+            sec_title = str(sec.get("title") or "Sección")
+            cap_num = chapter.get("number") or idx
+            display_title = f"Cap. {cap_num} › {sec_title}"
+            sec_pct = round(sec_words * 100 / total, 1)
+            rows.append(
+                {
+                    "role": sec_role,
+                    "title": display_title,
+                    "detected_as": sec_title,
+                    "words": sec_words,
+                    "percent": sec_pct,
+                    "percent_label": f"{sec_pct:.1f}%",
+                    "order": idx + sub_order * 0.01,
+                    "page": str(cap_num),
+                    "level": 2,
+                    "path": display_title,
+                    "source": "document_model_subsection",
+                    "node_id": sec.get("id"),
+                    "start": sec.get("start"),
+                    "end": sec.get("end"),
+                }
+            )
     return rows
 
 

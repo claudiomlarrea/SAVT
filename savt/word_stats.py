@@ -40,6 +40,17 @@ def _partition_word_map(parsed: dict) -> tuple[dict[str, str], dict[str, dict]]:
                 partition["presentacion"] = abstract_text
                 label = "Resumen" if abstract_kind == "resumen" else "Presentación / resumen"
                 meta["presentacion"] = {"detected_titles": [label]}
+        if parsed.get("structure_tree"):
+            from savt.structure_tree import ACADEMIC_SUBSECTION_ROLES, aggregate_role_text_from_tree
+
+            for role in ACADEMIC_SUBSECTION_ROLES:
+                tree_text = aggregate_role_text_from_tree(parsed, role)
+                if count_words(tree_text) > count_words(partition.get(role, "")):
+                    partition[role] = tree_text.strip()
+                    meta.setdefault(role, {})["detected_titles"] = [
+                        *(meta.get(role, {}).get("detected_titles") or []),
+                        "Secciones detectadas en capítulos",
+                    ]
         return partition, meta
 
     body = parsed.get("body", "")

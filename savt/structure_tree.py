@@ -40,6 +40,31 @@ _NUMBERED_TOP = re.compile(
     r"(?m)^(\d{1,2})\.\s+([A-ZÁÉÍÓÚÑ][^\n]{3,120})$"
 )
 
+# «1. INTRODUCCIÓN Las especies…» (título y cuerpo en la misma línea — habitual en PDF)
+_INLINE_SECTION_HEAD = re.compile(
+    r"(?im)^(\d{1,2})\.\s+"
+    r"(INTRODUCCIÓN|INTRODUCCION|"
+    r"MATERIALES?\s+Y\s+M[EÉ]TODOS?|"
+    r"M[EÉ]TODOS?|METODOLOG[IÍ]A|"
+    r"RESULTADOS?|DISCUSI[ÓO]N(?:ES)?|"
+    r"CONCLUSI[ÓO]N(?:ES)?|"
+    r"REFERENCIAS|BIBLIOGRAF[IÍ]A|"
+    r"JUSTIFICACI[ÓO]N|"
+    r"OBJETIVOS?(?:\s+ESPEC[IÍ]FICOS?|\s+GENERAL(?:ES)?)?|"
+    r"MARCO\s+TE[ÓO]RICO|"
+    r"ABSTRACT|RESUMEN|"
+    r"HIP[ÓO]TESIS"
+    r")\b\s+(?=[A-ZÁÉÍÓÚÑ\"«(])"
+)
+
+_NEXT_SECTION_BOUNDARY = re.compile(
+    r"(?im)(?:"
+    r"^\d{1,2}\.\s+(?:INTRODUCCI|MATERIAL|M[EÉ]TODO|METODOLOG|RESULTADO|DISCUSI|CONCLUSI|"
+    r"REFERENC|BIBLIOGRAF|JUSTIFICAC|OBJETIV|MARCO\s+TE|ABSTRACT|RESUMEN|HIP[ÓO]TESIS)\b"
+    r"|^\d{1,2}\.\s+[A-ZÁÉÍÓÚÑ][^\n]{3,120}$"
+    r")"
+)
+
 _FALSE_TITLE = re.compile(
     r"(?i)^(?:"
     r"y\s+\w+|"  # «y hemicelulasa»
@@ -182,9 +207,95 @@ def detect_thesis_type(full_text: str, *, structure_source: str = "") -> str:
     return "clasica"
 
 
+def _looks_like_chapter_toc(chunk: str, pos: int, body_start: int) -> bool:
+    """Mini-índice al inicio del capítulo (líneas numeradas sin prosa)."""
+    if pos > min(1200, len(chunk) // 4):
+        return False
+    after = chunk[body_start : body_start + 120]
+    if re.match(r"(?m)^\s*\d+\.\s+[A-Z]", after):
+        return True
+    snippet = chunk[pos : pos + 450]
+    numbered = len(re.findall(r"(?m)^\s*\d+\.\s+\S", snippet))
+    lowercase = len(re.findall(r"[a-záéíóúñ]", snippet))
+    return numbered >= 3 and lowercase < 90
+
+
+def _section_end_relative(chunk: str, body_start: int, section_num: str | None = None) -> int:
+    rest = chunk[body_start:]
+    candidates: list[int] = []
+    if section_num and str(section_num).isdigit():
+        n = int(section_num)
+        m = re.search(rf"(?im)\n{n + 1}\.\s+\S", rest)
+        if m and m.start() >= 15:
+            candidates.append(m.start())
+    m = re.search(r"(?im)\n\d{1,2}\.\s+[A-ZÁÉÍÓÚÑ]", rest)
+    if m and m.start() >= 15:
+        candidates.append(m.start())
+    match = _NEXT_SECTION_BOUNDARY.search(rest)
+    if match and match.start() >= 25:
+        candidates.append(match.start())
+    if candidates:
+        return body_start + min(candidates)
+    return len(chunk)
+
+
+ACADEMIC_SUBSECTION_ROLES = frozenset(
+    {
+        "introduccion",
+        "objetivos",
+        "metodologia",
+        "resultados",
+        "discusion",
+        "conclusiones",
+    }
+)
+
+
+def aggregate_role_text_from_tree(parsed: dict, role: str) -> str:
+    """Texto agregado de subsecciones del árbol con un rol académico (p. ej. introduccion)."""
+    tree = parsed.get("structure_tree") or []
+    full_text = parsed.get("full_text") or parsed.get("body") or ""
+    if not tree or not full_text or not role:
+        return ""
+    parts: list[str] = []
+    for node in tree:
+        for child in node.get("children") or []:
+            if str(child.get("role") or "") != role:
+                continue
+            start, end = child.get("start"), child.get("end")
+            if start is None or end is None:
+                continue
+            text = full_text[int(start) : int(end)].strip()
+            if text:
+                parts.append(text)
+    return "\n\n".join(parts)
+
+
 def _child_headings_in_chunk(chunk: str, *, abs_start: int) -> list[dict]:
     """Secciones mayores (nivel 2) dentro de un capítulo; no 3.1 / 3.1.1."""
-    found: list[tuple[int, str, str]] = []  # rel_pos, title, kind
+    spans: list[dict] = []
+
+    for match in _INLINE_SECTION_HEAD.finditer(chunk):
+        num = match.group(1)
+        heading = re.sub(r"\s+", " ", (match.group(2) or "").strip())
+        title = f"{num}. {heading}"
+        body_start = match.end()
+        if _looks_like_chapter_toc(chunk, match.start(), body_start):
+            continue
+        end = _section_end_relative(chunk, body_start, section_num=num)
+        text = chunk[match.start() : end].strip()
+        if count_words(text) < 40:
+            continue
+        spans.append(
+            {
+                "start": match.start(),
+                "end": end,
+                "title": title,
+                "kind": "inline",
+            }
+        )
+
+    found: list[tuple[int, str, str]] = []
 
     for match in _MAJOR_SECTION.finditer(chunk):
         title = re.sub(r"\s+", " ", match.group(0).strip())
@@ -218,22 +329,36 @@ def _child_headings_in_chunk(chunk: str, *, abs_start: int) -> list[dict]:
         found.append((match.start(), title, "numbered"))
 
     found.sort(key=lambda item: item[0])
-    # Deduplicar cercanos
     merged: list[tuple[int, str, str]] = []
     for item in found:
         if merged and item[0] - merged[-1][0] < 20:
             continue
         merged.append(item)
 
-    children: list[dict] = []
     for idx, (pos, title, kind) in enumerate(merged):
         end = merged[idx + 1][0] if idx + 1 < len(merged) else len(chunk)
+        if any(s["start"] <= pos < s["end"] for s in spans):
+            continue
+        spans.append({"start": pos, "end": end, "title": title, "kind": kind})
+
+    spans.sort(key=lambda s: s["start"])
+    deduped: list[dict] = []
+    for span in spans:
+        if deduped and span["start"] - deduped[-1]["start"] < 15:
+            if (span["end"] - span["start"]) > (deduped[-1]["end"] - deduped[-1]["start"]):
+                deduped[-1] = span
+            continue
+        deduped.append(span)
+
+    children: list[dict] = []
+    for span in deduped:
+        pos, end, title, kind = span["start"], span["end"], span["title"], span["kind"]
         text = chunk[pos:end].strip()
         words = count_words(text)
         if words < 40:
             continue
         role = classify_heading(title) or "otros"
-        if role == "otros" and kind == "numbered" and re.match(r"(?i)^\d+\.\s+introducci", title):
+        if role == "otros" and re.match(r"(?i)^\d+\.\s+introducci", title):
             role = "introduccion"
         children.append(
             {
