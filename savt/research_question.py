@@ -12,7 +12,11 @@ def audit_research_question(parsed: dict) -> tuple[list[Finding], dict]:
     conclusions = (parsed.get("conclusions") or "").lower()
     thesis_type = parsed.get("thesis_type") or "clasica"
     section_map = parsed.get("section_map") or {}
-    objectives_block = (section_map.get("objetivos") or parsed.get("objectives") or "").strip()
+    objectives_raw = section_map.get("objetivos") or parsed.get("objectives") or ""
+    if isinstance(objectives_raw, list):
+        objectives_block = "\n".join(str(item) for item in objectives_raw if item).strip()
+    else:
+        objectives_block = str(objectives_raw or "").strip()
 
     if thesis_type == "compendio" and not questions:
         has_objectives = bool(
