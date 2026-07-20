@@ -7,6 +7,7 @@ from savt.bibliography_styles import (
     apa_keys_match,
     citation_present_in_bibliography_text,
     is_institutional_citation_key,
+    supplemental_bibliography_keys,
     topical_match,
 )
 from savt.citations import filter_plausible_apa_keys, is_plausible_apa_citation_key, merged_bibliography_search_text
@@ -48,6 +49,7 @@ def _plausible_year(year: str) -> bool:
 
 def analyze_unmatched_apa(parsed: dict, bibliography: dict[int, ReferenceEntry]) -> list[dict]:
     bib_keys = {ref.key for ref in bibliography.values() if ref.key}
+    bib_keys |= supplemental_bibliography_keys(parsed)
     body = parsed.get("body", "")
     bib_corpus = merged_bibliography_search_text(parsed)
     raw_map: dict[str, list[str]] = {}

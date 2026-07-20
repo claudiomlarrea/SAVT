@@ -85,6 +85,8 @@ NAME_PARTICLES = {
     "du",
     "der",
     "den",
+    "dos",
+    "das",
 }
 
 ORG_SYNONYMS = {
@@ -108,6 +110,10 @@ def extract_surname(author_text: str) -> str:
         return ""
     if len(tokens) == 1:
         return tokens[0].rstrip(".")
+    if len(tokens) >= 2 and tokens[0].lower() in NAME_PARTICLES:
+        if len(tokens) >= 3 and tokens[1].lower() in NAME_PARTICLES:
+            return tokens[-1]
+        return "-".join(tokens[1:]) if len(tokens) > 2 else tokens[-1]
     if len(tokens) >= 3 and tokens[-2].lower() in NAME_PARTICLES:
         return tokens[-1]
     if len(tokens) >= 2 and tokens[0].lower() in NAME_PARTICLES:
@@ -124,7 +130,37 @@ def expand_apa_key(key: str) -> set[str]:
     variants = {key}
     for alias in ORG_SYNONYMS.get(author, set()):
         variants.add(f"{alias}|{year}")
+    if "-" in author:
+        tail = author.split("-")[-1]
+        if len(tail) >= 3:
+            variants.add(f"{tail}|{year}")
+    for particle in ("dos", "de", "del", "van", "von"):
+        prefix = f"{particle}-"
+        if author.startswith(prefix):
+            rest = author[len(prefix) :]
+            if rest:
+                variants.add(f"{rest}|{year}")
+    if year[:4].isdigit():
+        y = int(year[:4])
+        for delta in (-1, 1):
+            y2 = y + delta
+            if 1900 <= y2 <= 2030:
+                variants.add(f"{author}|{y2}")
     return variants
+
+
+def _authors_compatible(cited_author: str, bib_author: str) -> bool:
+    if not cited_author or not bib_author:
+        return False
+    if cited_author == bib_author:
+        return True
+    if cited_author in bib_author or bib_author in cited_author:
+        return True
+    if cited_author.split("-")[-1] == bib_author.split("-")[-1]:
+        return True
+    if len(cited_author) >= 5 and len(bib_author) >= 5 and cited_author[:5] == bib_author[:5]:
+        return True
+    return False
 
 
 def apa_keys_match(cited_key: str, bibliography_keys: set[str]) -> bool:
@@ -133,30 +169,103 @@ def apa_keys_match(cited_key: str, bibliography_keys: set[str]) -> bool:
     if "|" not in cited_key:
         return False
     author, year = cited_key.split("|", 1)
+    year = year[:4]
     for key in bibliography_keys:
         if not key or "|" not in key:
             continue
         bib_author, bib_year = key.split("|", 1)
+        bib_year = bib_year[:4]
         if bib_year != year:
-            continue
-        if author == bib_author:
-            return True
-        if author in bib_author or bib_author in author:
+            if not (year.isdigit() and bib_year.isdigit() and abs(int(year) - int(bib_year)) == 1):
+                continue
+        if _authors_compatible(author, bib_author):
             return True
     return False
 
 
-def citation_present_in_bibliography_text(cited_key: str, bib_text: str) -> bool:
-    """Respaldo cuando el PDF corrompe apellidos (p. ej. «Plaza de la Hoz»)."""
+def _prepare_bibliography_search_text(bib_text: str) -> str:
+    if not bib_text:
+        return ""
+    text = strip_accents(bib_text.lower())
+    return re.sub(r"\s+", " ", text)
+
+
+def _author_variants_for_search(author_norm: str) -> list[str]:
+    """Variantes de apellido normalizado para buscar en bibliografía (partículas, compuestos)."""
+    if not author_norm:
+        return []
+    seen: set[str] = set()
+    ordered: list[str] = []
+
+    def add(value: str) -> None:
+        if value and value not in seen:
+            seen.add(value)
+            ordered.append(value)
+
+    add(author_norm)
+    if "-" in author_norm:
+        add(author_norm.split("-")[-1])
+        add(author_norm.replace("-", ""))
+    for particle in ("dos", "de", "del", "van", "von", "da"):
+        prefix = f"{particle}-"
+        if author_norm.startswith(prefix):
+            add(author_norm[len(prefix) :])
+    # Citas «Dos Santos» → clave santos|año; en bibliografía suele figurar «dos santos».
+    if "-" not in author_norm and len(author_norm) >= 3:
+        add(f"dos-{author_norm}")
+        add(f"de-{author_norm}")
+    return ordered
+
+
+def _author_variant_pattern(variant: str) -> str:
+    parts = [p for p in variant.split("-") if p]
+    if not parts:
+        return re.escape(variant)
+    if len(parts) == 1:
+        return re.escape(parts[0])
+    return r"[\-\s,]+".join(re.escape(p) for p in parts)
+
+
+def citation_present_in_bibliography_text(
+    cited_key: str,
+    bib_text: str,
+    *,
+    max_gap: int = 450,
+    year_slack: int = 1,
+) -> bool:
+    """Respaldo cuando el PDF corrompe apellidos o la clave autor|año no coincide exactamente."""
     if "|" not in cited_key or not bib_text:
         return False
     author, year = cited_key.split("|", 1)
-    author = re.escape(author)
-    patterns = [
-        rf"(?i)\b{author}\b.{{0,220}}\({year}",
-        rf"(?i){author}.{{0,220}}\({year}",
-    ]
-    return any(re.search(p, bib_text) for p in patterns)
+    year = year[:4]
+    if not year.isdigit():
+        return False
+    search_text = _prepare_bibliography_search_text(bib_text)
+    years = {year}
+    y = int(year)
+    for delta in range(-year_slack, year_slack + 1):
+        y2 = y + delta
+        if 1900 <= y2 <= 2030:
+            years.add(str(y2))
+
+    for variant in _author_variants_for_search(author):
+        author_pat = _author_variant_pattern(variant)
+        for y in years:
+            pattern = rf"(?<![a-z]){author_pat}(?:[^a-z]|[a-z](?!{re.escape(y)})){{0,{max_gap}}}\({y}"
+            if re.search(pattern, search_text):
+                return True
+    return False
+
+
+def supplemental_bibliography_keys(parsed: dict) -> set[str]:
+    """Claves autor|año inferidas de todas las secciones REFERENCIAS del documento."""
+    from savt.citations import merged_bibliography_search_text
+
+    corpus = merged_bibliography_search_text(parsed)
+    if not corpus.strip():
+        return set()
+    extra = parse_apa_bibliography(corpus)
+    return {ref.key for ref in extra.values() if ref.key}
 
 
 def _citation_year(citation: str) -> str:
