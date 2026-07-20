@@ -634,275 +634,137 @@ def render_document_chapters(dashboard: dict) -> None:
 
 def render_structure_confirmation(sections: list[dict], structure_source: str = "") -> dict | None:
     """
-    Pantalla de estructura: automática (editable) o manual (índice pegado por el usuario).
-    Devuelve:
-      {"mode": "overrides", "overrides": [...]}
-      {"mode": "manual", "entries": [...]}
-      None si aún no confirma.
+    Paso obligatorio: el usuario contrasta el índice, tilda cada apartado y puede agregar otros.
+    Sin confirmación explícita no se audita.
     """
+    import pandas as pd
+
     from savt.structure_confirm import (
-        CANONICAL_TEMPLATE_OUTLINE,
-        MANUAL_OUTLINE_PLACEHOLDER,
-        editor_rows,
-        overrides_from_editor,
-        parse_manual_outline,
+        build_index_confirmation_rows,
+        confirmation_from_index_editor,
         role_options,
         structure_confidence_summary,
-        ROLE_LABELS,
     )
 
-    st.markdown("## 1. Estructura del documento")
-    st.caption(
-        "Si la detección automática mezcla capítulos y subtítulos, use la pestaña "
-        "**Ingresar índice manualmente** y pegue la tabla de contenido real."
+    st.markdown("## 2. Confirme el índice de su tesis")
+    st.info(
+        "**Antes de auditar**, abra el **índice / tabla de contenidos** del PDF y "
+        "marque aquí cada apartado que realmente existe. "
+        "Si su tesis usa otro nombre (p. ej. «Revisión de literatura» en lugar de «Marco teórico»), "
+        "escriba ese título y asigne el apartado académico. "
+        "Si falta uno, **agregue una fila** al final de la tabla."
     )
 
-    tab_auto, tab_manual = st.tabs(["Automática (detectada)", "Ingresar índice manualmente"])
-
-    with tab_auto:
-        if structure_source:
-            source_label = {
-                "index": "índice del documento",
-                "capitulos": "capítulos del cuerpo (tesis por compendio)",
-                "headings": "encabezados del cuerpo",
-                "confirmed": "confirmación previa",
-                "manual": "estructura manual",
-            }.get(structure_source, structure_source)
-            st.caption(f"Fuente de detección: **{source_label}**.")
-            if structure_source == "capitulos":
-                st.info(
-                    "Se detectó una **tesis por capítulos**. "
-                    "La tabla muestra capítulos (nivel 1), no subtítulos sueltos."
-                )
-
-        summary = structure_confidence_summary(sections)
-        if not sections:
-            st.warning("No se identificaron apartados automáticamente. Use la pestaña manual.")
-        elif summary["needs_review"]:
-            st.warning(
-                f"Hay {summary['low']} apartado(s) con confianza baja y {summary['medium']} con confianza media. "
-                "Si el mapa no coincide con su tesis, pase a la pestaña manual."
-            )
-        else:
-            st.info("Estructura detectada. Puede confirmarla o reemplazarla con su índice real.")
-
-        import pandas as pd
-
-        if sections:
-            base_rows = editor_rows(sections)
-            st.session_state["_structure_editor_meta"] = [
-                {"_role_original": r["_role_original"], "_text_key": r["_text_key"]} for r in base_rows
-            ]
-            df = pd.DataFrame(
-                [
-                    {
-                        "Incluir": r["Incluir"],
-                        "Detectado como": r["Detectado como"],
-                        "Apartado canónico": r["Apartado canónico"],
-                        "Confianza": r["Confianza"],
-                        "Palabras": r["Palabras"],
-                        "% del cuerpo": r["% del cuerpo"],
-                    }
-                    for r in base_rows
-                ]
-            )
-            edited = st.data_editor(
-                df,
-                hide_index=True,
-                disabled=["Detectado como", "Confianza", "Palabras", "% del cuerpo"],
-                column_config={
-                    "Incluir": st.column_config.CheckboxColumn("Incluir", default=True),
-                    "Apartado canónico": st.column_config.SelectboxColumn(
-                        "Apartado canónico",
-                        options=role_options(),
-                        required=True,
-                    ),
-                },
-                use_container_width=True,
-                key="structure_editor_auto",
-            )
-        else:
-            edited = None
-
-        col_a, col_b = st.columns(2)
-        with col_a:
-            confirm_auto = st.button("Confirmar detección y auditar", type="primary", key="btn_auto_confirm")
-        with col_b:
-            skip_auto = st.button("Auditar sin cambios", key="btn_auto_skip")
-
-        if confirm_auto or skip_auto:
-            if not sections:
-                return {"mode": "overrides", "overrides": []}
-            if skip_auto:
-                return {
-                    "mode": "overrides",
-                    "overrides": [
-                        {
-                            "role_original": s.get("role"),
-                            "confirmed_role": s.get("role"),
-                            "include": True,
-                            "detected_as": s.get("detected_as"),
-                            "words": s.get("words", 0),
-                        }
-                        for s in sections
-                    ],
-                }
-            records = edited.to_dict("records") if edited is not None else []
-            meta = st.session_state.get("_structure_editor_meta") or []
-            for idx, record in enumerate(records):
-                if idx < len(meta):
-                    record["_role_original"] = meta[idx]["_role_original"]
-                    record["_text_key"] = meta[idx]["_text_key"]
-            return {"mode": "overrides", "overrides": overrides_from_editor(records)}
-
-    with tab_manual:
-        st.markdown("### Pegue su tabla de contenido")
+    if structure_source:
+        source_label = {
+            "index": "índice del documento",
+            "capitulos": "capítulos del cuerpo (tesis por compendio)",
+            "headings": "encabezados del cuerpo",
+            "confirmed": "confirmación previa",
+            "manual": "estructura manual",
+        }.get(structure_source, structure_source)
         st.caption(
-            "Un título por línea. Si pega desde el PDF, use **Limpiar pegado de PDF** "
-            "(une líneas partidas y quita números de página). Mejor aún: deje solo "
-            "capítulos y apartados principales. Opcional: rol con `|` "
-            "(metodologia, resultados, discusion, …)."
+            f"Propuesta automática (solo ayuda): fuente **{source_label}**. "
+            "Usted decide qué tildar según el índice real."
         )
-        c1, c2, c3 = st.columns(3)
-        with c1:
-            if st.button("Cargar plantilla canónica", key="btn_tpl_canonical"):
-                st.session_state["manual_outline_area"] = CANONICAL_TEMPLATE_OUTLINE
-                st.session_state["manual_outline_text"] = CANONICAL_TEMPLATE_OUTLINE
-                st.rerun()
-        with c2:
-            if st.button("Limpiar pegado de PDF", key="btn_tpl_clean_pdf"):
-                from savt.structure_confirm import clean_pasted_toc
 
-                raw = st.session_state.get("manual_outline_area") or st.session_state.get(
-                    "manual_outline_text", ""
-                )
-                cleaned = clean_pasted_toc(raw, major_only=True)
-                st.session_state["manual_outline_area"] = cleaned
-                st.session_state["manual_outline_text"] = cleaned
-                st.rerun()
-        with c3:
-            if st.button("Vaciar", key="btn_tpl_clear"):
-                st.session_state["manual_outline_area"] = ""
-                st.session_state["manual_outline_text"] = ""
-                st.rerun()
-
-        # Solo key (sin value=): evita desfase Streamlit que deja el botón “prohibido”
-        # mientras el texto ya se ve en pantalla.
-        if "manual_outline_area" not in st.session_state:
-            st.session_state["manual_outline_area"] = st.session_state.get("manual_outline_text", "")
-
-        outline_text = st.text_area(
-            "Índice / capítulos",
-            height=280,
-            placeholder=MANUAL_OUTLINE_PLACEHOLDER,
-            key="manual_outline_area",
+    summary = structure_confidence_summary(sections or [])
+    if sections and summary.get("needs_review"):
+        st.warning(
+            f"La detección automática tiene {summary['low']} apartado(s) dudoso(s). "
+            "Contraste con el índice antes de continuar."
         )
-        st.session_state["manual_outline_text"] = outline_text or ""
-
-        parsed_entries = parse_manual_outline(outline_text or "")
-        edited_manual = None
-        if parsed_entries:
-            import pandas as pd
-
-            preview = pd.DataFrame(
-                [
-                    {
-                        "Incluir": e.get("include", True),
-                        "Título en el documento": e.get("title", ""),
-                        "Apartado canónico": ROLE_LABELS.get(e.get("role", "otros"), ROLE_LABELS["otros"]),
-                    }
-                    for e in parsed_entries
-                ]
-            )
-            edited_manual = st.data_editor(
-                preview,
-                hide_index=True,
-                column_config={
-                    "Incluir": st.column_config.CheckboxColumn("Incluir", default=True),
-                    "Título en el documento": st.column_config.TextColumn("Título en el documento", width="large"),
-                    "Apartado canónico": st.column_config.SelectboxColumn(
-                        "Apartado canónico",
-                        options=role_options(),
-                        required=True,
-                    ),
-                },
-                num_rows="dynamic",
-                use_container_width=True,
-                key="manual_outline_editor",
-            )
-            n_entries = len(edited_manual)
-            st.caption(
-                f"{n_entries} entradas listas. SAVT buscará cada título en el PDF y cortará los bloques."
-            )
-            if n_entries > 25:
-                st.warning(
-                    "Hay muchas entradas (típico al pegar el índice completo del PDF). "
-                    "Pulse **Limpiar pegado de PDF** o deje solo 8–15 apartados principales "
-                    "para un mejor resultado."
-                )
-        elif (outline_text or "").strip():
-            st.warning(
-                "El texto pegado no se pudo interpretar como títulos. "
-                "Pruebe **Limpiar pegado de PDF** o deje un título por línea "
-                "(ej. CAPÍTULO I, MÉTODOS, RESULTADOS)."
-            )
-        else:
-            st.info(
-                "Pegue al menos 2 títulos principales "
-                "(por ejemplo CAPÍTULO I, MÉTODOS, RESULTADOS, DISCUSIÓN, REFERENCIAS)."
-            )
-
-        # Siempre habilitado: validamos al hacer clic (el cursor 🚫 confundía al usuario).
-        confirm_manual = st.button(
-            "Localizar títulos y auditar con mi estructura",
-            type="primary",
-            key="btn_manual_confirm",
+    elif not sections:
+        st.warning(
+            "No se detectó una estructura clara. Complete la tabla con los títulos "
+            "del índice (marque «Presente» y escriba el título)."
         )
-        if confirm_manual:
-            from savt.structure_confirm import label_to_role
 
-            raw_now = (
-                st.session_state.get("manual_outline_area")
-                or st.session_state.get("manual_outline_text")
-                or outline_text
-                or ""
+    reviewed = st.checkbox(
+        "He abierto el índice del documento y estoy contrastando cada apartado",
+        key="index_reviewed_checkbox",
+        value=bool(st.session_state.get("index_reviewed_checkbox")),
+    )
+
+    base_rows = build_index_confirmation_rows(sections or [])
+    st.session_state["_index_confirm_meta"] = [
+        {"_role_original": r.get("_role_original", "otros")} for r in base_rows
+    ]
+    df = pd.DataFrame(
+        [
+            {
+                "Presente en el índice": r["Presente en el índice"],
+                "Título en el índice": r["Título en el índice"],
+                "Apartado académico": r["Apartado académico"],
+                "Palabras (detección)": r["Palabras (detección)"],
+            }
+            for r in base_rows
+        ]
+    )
+
+    st.markdown("### Apartados a confirmar")
+    st.caption(
+        "Marque **Presente en el índice**. Complete o corrija **Título en el índice** "
+        "(tal como aparece en su tesis). Elija el **Apartado académico**. "
+        "Use **+** al final de la tabla para agregar un apartado distinto."
+    )
+    edited = st.data_editor(
+        df,
+        hide_index=True,
+        disabled=["Palabras (detección)"],
+        column_config={
+            "Presente en el índice": st.column_config.CheckboxColumn(
+                "Presente en el índice",
+                help="Tilde solo si ese apartado figura en el índice / cuerpo de su tesis.",
+                default=False,
+            ),
+            "Título en el índice": st.column_config.TextColumn(
+                "Título en el índice",
+                help="Texto exacto o cercano al título del índice (ej. «2. REVISIÓN DE LITERATURA»).",
+                width="large",
+            ),
+            "Apartado académico": st.column_config.SelectboxColumn(
+                "Apartado académico",
+                options=role_options(),
+                required=True,
+            ),
+            "Palabras (detección)": st.column_config.TextColumn(
+                "Palabras (detección)",
+                help="Estimación automática previa; se recalcula al auditar con su confirmación.",
+            ),
+        },
+        num_rows="dynamic",
+        use_container_width=True,
+        key="index_confirmation_editor",
+    )
+
+    present_count = 0
+    if edited is not None:
+        present_count = sum(1 for row in edited.to_dict("records") if row.get("Presente en el índice"))
+    st.caption(f"Apartados marcados como presentes: **{present_count}** (mínimo 2 para auditar).")
+
+    confirm = st.button(
+        "Confirmar índice y auditar",
+        type="primary",
+        key="btn_index_confirm_audit",
+        disabled=not reviewed,
+    )
+    if not reviewed:
+        st.caption("Active la casilla de contraste con el índice para habilitar la auditoría.")
+        return None
+
+    if confirm:
+        records = edited.to_dict("records") if edited is not None else []
+        choice = confirmation_from_index_editor(records)
+        if choice is None:
+            st.error(
+                "Marque al menos **dos** apartados como presentes y escriba su título "
+                "(o deje el nombre del apartado académico). Agregue filas si faltan."
             )
-            entries = []
-            source_rows = None
-            if edited_manual is not None:
-                source_rows = edited_manual.to_dict("records")
-            else:
-                fallback = parse_manual_outline(raw_now)
-                source_rows = [
-                    {
-                        "Incluir": e.get("include", True),
-                        "Título en el documento": e.get("title", ""),
-                        "Apartado canónico": ROLE_LABELS.get(e.get("role", "otros"), ROLE_LABELS["otros"]),
-                    }
-                    for e in fallback
-                ]
-
-            for row in source_rows or []:
-                title = str(row.get("Título en el documento") or "").strip()
-                if not title:
-                    continue
-                role = label_to_role(str(row.get("Apartado canónico") or ROLE_LABELS["otros"]))
-                entries.append(
-                    {
-                        "title": title,
-                        "role": role,
-                        "include": bool(row.get("Incluir", True)),
-                    }
-                )
-            if len(entries) < 2:
-                st.error(
-                    "Ingrese al menos dos títulos válidos (uno por línea) y vuelva a pulsar el botón."
-                )
-            else:
-                return {"mode": "manual", "entries": entries}
+            return None
+        return choice
 
     return None
-
 
 def render_technical_section_detail(dashboard: dict) -> None:
     """Métricas por apartado y cuadre de citas — colapsado para no duplicar el informe principal."""
@@ -1559,7 +1421,7 @@ def _run_app() -> None:
             st.session_state.pop(key, None)
         st.info(
             "Suba un archivo .docx o .pdf para iniciar la pre-auditoría académica. "
-            "Podrá confirmar la estructura detectada o **pegar su índice manualmente**. "
+            "Luego **confirmará el índice** (marcar cada apartado) antes de auditar. "
             "Seleccione el perfil institucional en la barra lateral."
         )
         st.divider()
@@ -1569,7 +1431,15 @@ def _run_app() -> None:
     # Nuevo archivo: limpiar estado de estructura/informe previos.
     if st.session_state.get("uploaded_name") != uploaded.name:
         st.session_state["uploaded_name"] = uploaded.name
-        for key in ("parsed_doc", "detected_sections", "structure_ready", "report", "manual_outline_text"):
+        for key in (
+            "parsed_doc",
+            "detected_sections",
+            "structure_ready",
+            "report",
+            "manual_outline_text",
+            "index_reviewed_checkbox",
+            "index_confirmation_editor",
+        ):
             st.session_state.pop(key, None)
 
     parsed = st.session_state.get("parsed_doc")
@@ -1593,8 +1463,8 @@ def _run_app() -> None:
             st.session_state.pop("report", None)
             st.rerun()
         st.info(
-            "Paso 1: detectar la estructura automática. "
-            "Si no coincide con su tesis, use la pestaña **Ingresar índice manualmente**."
+            "Paso 1: detectar una propuesta de estructura. "
+            "Paso 2: **abrir el índice del PDF y marcar cada apartado** antes de auditar."
         )
         st.divider()
         render_user_feedback(context={"filename": uploaded.name})
@@ -1627,15 +1497,14 @@ def _run_app() -> None:
             found = len(parsed.get("index_sections") or [])
             if found < 2:
                 st.error(
-                    "Con la estructura manual solo se localizaron menos de 2 apartados en el texto. "
-                    "Use **Limpiar pegado de PDF**, deje solo capítulos/apartados principales "
-                    "(CAPÍTULO I, MÉTODOS, RESULTADOS…) y reintente."
+                    "Con el índice confirmado solo se localizaron menos de 2 apartados en el texto. "
+                    "Revise los títulos marcados (use el texto del índice, p. ej. «2. REVISIÓN DE LITERATURA») "
+                    "y reintente."
                 )
+                st.session_state.pop("index_reviewed_checkbox", None)
                 st.divider()
                 render_user_feedback(context={"filename": uploaded.name})
                 return
-            # Mantener detected_sections actualizado (no None): si queda None, un rerun
-            # vuelve incorrectamente a «1. Detectar estructura».
             parsed["document_model"] = build_document_model(parsed)
             st.session_state["detected_sections"] = detect_document_sections(parsed)
         else:

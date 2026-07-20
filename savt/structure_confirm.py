@@ -129,6 +129,95 @@ def editor_rows(sections: list[dict]) -> list[dict]:
     return rows
 
 
+# Roles que el usuario debe contrastar con el índice (checklist de confirmación).
+INDEX_CHECKLIST_ROLES: tuple[str, ...] = (
+    "presentacion",
+    "introduccion",
+    "objetivos",
+    "marco_teorico",
+    "metodologia",
+    "resultados",
+    "discusion",
+    "conclusiones",
+    "bibliografia",
+)
+
+
+def build_index_confirmation_rows(sections: list[dict]) -> list[dict]:
+    """
+    Filas para que el usuario contraste el índice: detección previa + huecos
+    de apartados canónicos faltantes (desmarcados) y posibilidad de agregar otros.
+    """
+    rows: list[dict] = []
+    seen_roles: set[str] = set()
+
+    for item in sections or []:
+        role = item.get("confirmed_role") or item.get("role") or "otros"
+        title = str(item.get("detected_as") or item.get("title") or item.get("path") or "").strip()
+        if not title or title == "—":
+            title = ROLE_LABELS.get(role, role)
+        words = int(item.get("words") or 0)
+        # No marcar por defecto filas con 0 palabras: el usuario debe tildarlas al verificar el índice.
+        include = bool(item.get("include", True)) and words > 0
+        rows.append(
+            {
+                "Presente en el índice": include,
+                "Título en el índice": title,
+                "Apartado académico": ROLE_LABELS.get(role, ROLE_LABELS["otros"]),
+                "Palabras (detección)": words if words else "—",
+                "_role_original": role,
+            }
+        )
+        if role in INDEX_CHECKLIST_ROLES:
+            seen_roles.add(role)
+
+    for role in INDEX_CHECKLIST_ROLES:
+        if role in seen_roles:
+            continue
+        rows.append(
+            {
+                "Presente en el índice": False,
+                "Título en el índice": "",
+                "Apartado académico": ROLE_LABELS[role],
+                "Palabras (detección)": "—",
+                "_role_original": role,
+            }
+        )
+
+    return rows
+
+
+def confirmation_from_index_editor(rows: list[dict]) -> dict | None:
+    """
+    Convierte la checklist del índice en modo manual (títulos a localizar)
+    o overrides si solo se reasignaron roles detectados.
+    """
+    entries: list[dict] = []
+    for row in rows or []:
+        if not row.get("Presente en el índice", False):
+            continue
+        title = str(row.get("Título en el índice") or "").strip()
+        role = label_to_role(str(row.get("Apartado académico") or ROLE_LABELS["otros"]))
+        if role == "omitir":
+            continue
+        if not title:
+            # Sin título explícito: usar la etiqueta canónica para buscar en el PDF.
+            title = ROLE_LABELS.get(role, "")
+        if not title:
+            continue
+        entries.append(
+            {
+                "title": title,
+                "role": role,
+                "include": True,
+            }
+        )
+
+    if len(entries) < 2:
+        return None
+    return {"mode": "manual", "entries": entries}
+
+
 def overrides_from_editor(rows: list[dict]) -> list[dict]:
     """Normaliza filas editadas a overrides {role_original, confirmed_role, include}."""
     overrides: list[dict] = []
