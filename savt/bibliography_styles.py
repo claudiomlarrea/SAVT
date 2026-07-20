@@ -354,6 +354,22 @@ def detect_citation_style(body: str, bib_text: str) -> str:
     return "apa"
 
 
+def detect_citation_style_with_body(body: str, bib_text: str) -> str:
+    """Elige estilo usando bibliografía y señales en el cuerpo (autor-año vs numeradas)."""
+    style = detect_citation_style(body, bib_text)
+    if not (body or "").strip():
+        return style
+    from savt.citations import count_apa_citation_appearances, count_numeric_citation_appearances
+
+    apa_n = count_apa_citation_appearances(body)
+    num_n = count_numeric_citation_appearances(body, max_ref=500)
+    if apa_n >= 12 and apa_n >= max(num_n, 1) * 2:
+        return "apa"
+    if num_n >= 12 and num_n > apa_n * 2:
+        return "numbered"
+    return style
+
+
 def _strip_bibliography_heading(bib_text: str) -> str:
     return re.sub(r"^(?:\s*BIBLIOGRAF[IÍ]A\s*)", "", bib_text, flags=re.I)
 

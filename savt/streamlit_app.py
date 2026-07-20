@@ -207,7 +207,6 @@ def _jury_apartado_rows(dashboard: dict) -> tuple[list[dict], int, int]:
         bib_words = int((dashboard.get("canonical_words") or {}).get("bibliografia") or 0)
 
     by_role = {s.get("role"): s for s in (content.get("sections") or []) if s.get("role")}
-    canonical_words = dashboard.get("canonical_words") or {}
 
     jury_roles = (
         "introduccion",
@@ -223,7 +222,7 @@ def _jury_apartado_rows(dashboard: dict) -> tuple[list[dict], int, int]:
     for role in jury_roles:
         label = SECTION_TITLES.get(role, role.replace("_", " ").title())
         sec = by_role.get(role) or {}
-        words = int(sec.get("words") or canonical_words.get(role) or 0)
+        words = int(sec.get("words") or 0)
         pct = sec.get("percent_label")
         if not pct and words:
             pct = f"{round(words * 100 / denom, 1):.1f}%"

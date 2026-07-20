@@ -7,6 +7,7 @@ from typing import Any
 
 from savt.bibliography_styles import (
     detect_citation_style,
+    detect_citation_style_with_body,
     parse_bibliography_by_style,
 )
 from savt.index_parser import (
@@ -195,7 +196,7 @@ def run_document_pipeline(
             words=0,
         )
     else:
-        citation_style = detect_citation_style("", bib_for_parse)
+        citation_style = detect_citation_style_with_body(body, bib_for_parse)
         bibliography = parse_bibliography_by_style(bib_for_parse, citation_style)
         step3_status = "ok" if len(bibliography) >= 3 else "warning"
         step3 = _step(

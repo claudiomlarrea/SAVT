@@ -98,6 +98,8 @@ def _score_bibliography_candidate(full_text: str, pos: int) -> int:
     score = 0
     if re.match(r"(?i)^\s*\d+\.?\s*BIBLIOGRAF", line):
         score += 70
+    elif re.match(r"(?i)^\s*\d{1,2}\.\s+REFERENCIAS", line):
+        score += 75
     elif re.match(r"(?i)^\s*REFERENCIAS\s+BIBLIOGRAF", line):
         score += 65
     elif re.match(r"(?i)^\s*BIBLIOGRAF", line):
@@ -216,6 +218,7 @@ def _bibliography_start_positions(full_text: str) -> list[int]:
         r"(?im)^\s*(?:\d+\.?\s*)?BIBLIOGRAF[IÍÁ][A-Z]*\s*(?:\n|$)",
         r"(?im)^\s*REFERENCIAS\s+BIBLIOGRAF[IÍÁ][A-Z]*\s*(?:\n|$)",
         r"(?im)^\s*REFERENCIAS\s*$",
+        r"(?im)^\s*\d{1,2}\.\s+REFERENCIAS(?:\s+BIBLIOGR[AÁ]FICAS)?\s*(?:•|\n|$)",
         r"(?im)\n\n\s*(?:\d+\.?\s*)?BIBLIOGRAF[IÍÁ][A-Z]*\s*(?:\n\s*)?(?=[A-ZÁÉÍÓÚ\"(])",
         r"(?im)\n\n\s*BIBLIOGRAF[IÍÁ][A-Z]*\s*(?:\n\s*)?(?=[A-ZÁÉÍÓÚ\"(])",
         r"(?im)(?:^|\n\n)\s*BIBLIOGRAF[IÍÁ][A-Z]*\s*\n\s*\d+\.\s+[A-Za-zÁÉÍÓÚ\"(]",
@@ -304,6 +307,20 @@ def split_body_and_bibliography(full_text: str) -> tuple[str, str]:
         best_score = max(_score_bibliography_candidate(full_text, pos) for pos in positions)
         top = [pos for pos in positions if _score_bibliography_candidate(full_text, pos) >= best_score - 2]
         idx = max(top)
+        numbered_refs = list(
+            re.finditer(r"(?im)^\s*\d{1,2}\.\s+REFERENCIAS(?:\s+BIBLIOGR[AÁ]FICAS)?\s*(?:•|\n|$)", full_text)
+        )
+        if numbered_refs:
+            final_ref = numbered_refs[-1].start()
+            if final_ref > idx:
+                idx = final_ref
+        concl = re.search(r"(?im)^\s*\d{1,2}\.\s+CONCLUSI[ÓO]N", full_text)
+        if concl and concl.start() >= idx:
+            after_concl = [m.start() for m in numbered_refs if m.start() > concl.start()]
+            if after_concl:
+                idx = min(after_concl)
+            else:
+                idx = max(idx, concl.start() + 500)
         body = full_text[:idx].strip()
         bib = full_text[idx:].strip()
         if re.match(

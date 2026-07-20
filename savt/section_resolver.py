@@ -875,7 +875,8 @@ def _find_major_section_boundaries(
             [
                 rf"(?im){_PARTE}CONCLUSIONES",
                 r"(?m)(?:^|\n)\s*CONCLUSI[ÓO]N(?:ES)?(?:\s+GENERALES|\s+FINALES)?\s*(?:\n|$|\d+\.)",
-                r"(?m)(?:^|\n)\s*CONCLUSI[ÓO]N(?:ES)?\b(?=\s+[A-ZÁÉÍÓÚÑ])",
+                r"(?m)(?:^|\n)\s*CONCLUSI[ÓO]N(?:ES)?\b(?=\s+[A-ZÁÉÍÓÚÑ•\-–])",
+                r"(?m)(?:^|\n)\s*\d{1,2}\.\s+CONCLUSI[ÓO]N(?:ES)?\b",
             ],
             True,
         ),
@@ -937,6 +938,94 @@ def _find_major_section_boundaries(
     return unique
 
 
+_NUMBERED_OUTLINE_HEAD = re.compile(
+    r"(?im)^\s*(\d{1,2})\.\s+"
+    r"(INTRODUCCI[ÓO]N|"
+    r"REVISI[ÓO]N(?:\s+DE\s+LITERATURA|\s+BIBLIOGR[AÁ]FICA)?|"
+    r"JUSTIFICACI[ÓO]N|"
+    r"HIP[ÓO]TESIS(?:\s+EXPERIMENTAL)?|"
+    r"OBJETIVOS?(?:\s+GENERAL(?:ES)?|\s+ESPEC[IÍ]FICOS?)?|"
+    r"DIAGRAMA(?:\s+GENERAL)?(?:\s+DE\s+METODOLOG[IÍ]A)?|"
+    r"MATERIALES?\s+Y\s+M[EÉ]TODOS?|"
+    r"METODOLOG[IÍ]A|"
+    r"M[EÉ]TODOS?|"
+    r"RESULTADOS?|"
+    r"DISCUSI[ÓO]N(?:ES)?|"
+    r"CONCLUSI[ÓO]N(?:ES)?)"
+    r"(?:\s+(?=[A-ZÁÉÍÓÚÑ\"«(•\-])|\s*$|\n)"
+)
+
+
+def _role_for_numbered_heading(num: int, title_line: str) -> str | None:
+    role = classify_heading(title_line)
+    if role:
+        return role
+    norm = strip_accents(title_line.lower())
+    if "introducci" in norm:
+        return "introduccion"
+    if "revision" in norm or "literatura" in norm or "marco" in norm:
+        return "marco_teorico"
+    if "objetivo" in norm or "hipotesis" in norm or "justificacion" in norm:
+        return "objetivos"
+    if "diagrama" in norm or "material" in norm or "metodolog" in norm or "metodo" in norm:
+        return "metodologia"
+    if "resultado" in norm:
+        return "resultados"
+    if "discusi" in norm:
+        return "discusion"
+    if "conclusi" in norm:
+        return "conclusiones"
+    return None
+
+
+def _partition_from_numbered_outline(body: str) -> tuple[dict[str, str], dict[str, dict]] | None:
+    """
+    Tesis monográfica «1. INTRODUCCIÓN», «2. REVISIÓN…», etc. (línea sola o título+cuerpo).
+    Partición sin solapamiento agrupando tramos contiguos del mismo rol.
+    """
+    matches: list[tuple[int, int, str, str]] = []
+    for match in _NUMBERED_OUTLINE_HEAD.finditer(body):
+        num = int(match.group(1))
+        if num > 15:
+            continue
+        rest = body[match.start() : match.start() + 220].lstrip("\n\r")
+        title_line = rest.split("\n")[0].strip()[:160]
+        if not title_line:
+            title_line = f"{num}. {match.group(2).strip()}"
+        role = _role_for_numbered_heading(num, title_line)
+        if not role or role == "presentacion":
+            continue
+        matches.append((match.start(), num, title_line, role))
+
+    if len(matches) < 4:
+        return None
+
+    matches.sort(key=lambda item: item[0])
+    deduped: list[tuple[int, int, str, str]] = []
+    for item in matches:
+        if deduped and item[0] - deduped[-1][0] < 12:
+            continue
+        deduped.append(item)
+
+    sections: dict[str, str] = {}
+    meta: dict[str, dict] = {}
+    for idx, (pos, _num, title_line, role) in enumerate(deduped):
+        end = deduped[idx + 1][0] if idx + 1 < len(deduped) else len(body)
+        chunk = body[pos:end].strip()
+        if _word_count(chunk) < 20:
+            continue
+        if role in sections:
+            sections[role] = f"{sections[role]}\n\n{chunk}".strip()
+            meta[role]["detected_titles"].append(title_line[:100])
+        else:
+            sections[role] = chunk
+            meta[role] = {"detected_titles": [title_line[:100]]}
+
+    if len(sections) < 3:
+        return None
+    return sections, meta
+
+
 def build_non_overlapping_word_partition(body: str) -> tuple[dict[str, str], dict[str, dict]]:
     """
     Parte el cuerpo en tramos mutuamente excluyentes (sin doble conteo).
@@ -946,6 +1035,10 @@ def build_non_overlapping_word_partition(body: str) -> tuple[dict[str, str], dic
         return {}, {}
 
     body = _strip_leading_toc(body)
+
+    numbered = _partition_from_numbered_outline(body)
+    if numbered is not None:
+        return numbered
 
     major = _find_major_section_boundaries(body, pos_objetivos=None)
     first_section_pos = major[0][0] if major else len(body)
